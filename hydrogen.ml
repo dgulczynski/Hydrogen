@@ -33,7 +33,7 @@ let rec string_of_expr (e : expr) : string =
       | V v -> v
       | _ -> "(" ^ string_of_expr e'' ^ ")" )
   | Let(var,body,expr) -> "let " ^ var ^ " = " ^ string_of_expr body ^ " in " ^ string_of_expr expr
-  | Fun(f,x,body) -> f ^ " " ^ x ^" = " ^ string_of_expr body
+  | Fun(f,x,body) -> "fun " ^ f ^ " " ^ x ^". " ^ string_of_expr body
 
 let infer_type (expr : expr) =
   let rec gather_constraints (gamma : (var * t) list) (expr : expr) (cs : (t * t) list) :
@@ -94,13 +94,11 @@ let infer_type (expr : expr) =
       TV ("t" ^ string_of_int !counter))
   in
   let gamma, t, cs = gather_constraints [] expr [] in
-  (* Printf.printf "With constraints: ";
-     List.iter (fun (t1,t2) -> Printf.printf " (%s ~ %s)"  (string_of_type t1) (string_of_type t2)) cs; *)
   let t' = unify_types t cs in
   Printf.printf "Type of %s is %s" (string_of_expr expr) (string_of_type t');
   if gamma = [] then Printf.printf "\n" else (
-    Printf.printf " in env:";
-    List.iter (fun (x,t) -> Printf.printf " (%s :: %s)" x (string_of_type t)) gamma;
+    Printf.printf " with env:";
+    List.iter (fun (x,t) -> Printf.printf " (%s : %s)" x (string_of_type t)) gamma;
     Printf.printf "\n");
   t'
 
