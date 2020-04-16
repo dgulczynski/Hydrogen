@@ -1,0 +1,4 @@
+profile = ocamlformat
+break-cases = fit
+margin = 90
+wrap-comments = true

@@ -13,19 +13,30 @@ Type inference playground.
 # Usage
 Simply running `ocaml examples.ml` should result in output like:
 ```
-Type of λx. x is 't0 -> 't0
-Type of λx. x 2 is (Int -> 't1) -> 't1
-ERROR: Cannot construct infinite type t0 ~ t0 -> t1
+Simple examples:
+Type of λx. x is 'a -> 'a
+Type of λx. x 2 is (Int -> 'b) -> 'b
+Type of λy. (λx. x) 1 is 'a -> Int
+Type of λx. λy. x is 'a -> 'b -> 'a
+Type of λy. (λx. y x) 1 is (Int -> 'd) -> 'd
+Type of λx. (λx. x) (x 42) is (Int -> 'd) -> 'd
+Type of λx. λy. λz. (x z) (y z) is ('c -> 'e -> 'f) -> ('c -> 'e) -> 'c -> 'f
+
+Let bindings:
+Type of let f = λx. x 1 in λy. f (λx. y x) is (Int -> 'g) -> 'g with env: (f : (Int -> 'b) -> 'b)
+Type of let f = λx. x 1 in λy. f (λx. y x) is (Int -> 'g) -> 'g with env: (f : (Int -> 'b) -> 'b)
+Type of let g = λx. x (x 1) in let f = λx. x 1 in λy. g (f (λx. y x)) is (Int -> Int -> Int) -> Int with env: (f : (Int -> 'e) -> 'e) (g : (Int -> Int) -> Int)
+
+Ill-typed example:
+ERROR: Cannot construct infinite type a ~ a -> b
 Type of λx. x x is ILL-TYPED
-Type of λy. (λx. x) 1 is 't0 -> Int
-Type of λx. λy. x is 't0 -> 't1 -> 't0
-Type of λy. (λx. y x) 1 is (Int -> 't3) -> 't3
-Type of λx. (λy. y) (x 42) is (Int -> 't3) -> 't3
-Type of λx. λy. λz. (x z) (y z) is ('t2 -> 't4 -> 't5) -> ('t2 -> 't4) -> 't2 -> 't5
-Type of let f = λx. x 1 in λy. f (λx. y x) is (Int -> 't6) -> 't6 with env: (f : (Int -> 't1) -> 't1)
-Type of let g = λx. x (x 1) in let f = λx. x 1 in λy. g (f (λx. y x)) is (Int -> Int -> Int) -> Int with env: (f : (Int -> 't4) -> 't4) (g : (Int -> Int) -> Int)
+
+Recursive functions:
 Type of fun f x. f (f 1) is Int -> Int
-Type of fun fix f. f (fix f) is ('t2 -> 't2) -> 't2
-Type of (fun fix f. f (fix f)) (λx. λy. λz. 2) is 't5 -> 't6 -> Int
-Type of let id = λx. x in id id is 't2 -> 't2 with env: (id : 't0 -> 't0)
+Type of fun fix f. f (fix f) is ('c -> 'c) -> 'c
+Type of (fun fix f. f (fix f)) (λx. λy. λz. 2) is 'f -> 'g -> Int
+
+Parametric polymorphism:
+Type of let id = λx. x in id id is 'c -> 'c with env: (id : 'a -> 'a)
+
 ```
