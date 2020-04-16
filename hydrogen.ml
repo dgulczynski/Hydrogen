@@ -49,11 +49,11 @@ let infer_type (expr : expr) =
     | I _ -> (gamma, Int, cs)
     | V v -> (gamma, instantiate (snd (List.find (fun (v', t') -> v' = v) gamma)), cs)
     | Lam (x, e) ->
-        let tx = newTV () in
+        let tx = freshTV () in
         let _, te, cse = gather_constraints ((x, tx) :: gamma) e cs in
         (gamma, Arrow (tx, te), cse)
     | Fun (f, x, e) ->
-        let tx = newTV () and tfx = newTV () in
+        let tx = freshTV () and tfx = freshTV () in
         let tf = Arrow (tx, tfx) in
         let _, te, cse =
           gather_constraints ((f, tf) :: (x, tx) :: gamma) e cs
@@ -62,7 +62,7 @@ let infer_type (expr : expr) =
     | App (f, x) ->
         let _, tf, csf = gather_constraints gamma f cs in
         let _, tx, csx = gather_constraints gamma x csf in
-        let tfx = newTV () in
+        let tfx = freshTV () in
         (gamma, tfx, (tf, Arrow (tx, tfx)) :: csx)
     | Let (x, e, e') ->
         let _, te, cse = gather_constraints gamma e cs in
@@ -73,7 +73,7 @@ let infer_type (expr : expr) =
                 (unify_types te cse) )
           :: gamma )
           e' cs
-  
+
   and unify_types (t : t) (cs : (t * t) list) : t =
     match cs with
     | [] -> t
@@ -107,7 +107,7 @@ let infer_type (expr : expr) =
   and occurs (x : t) (t : t) : bool =
     match t with Arrow (t1, t2) -> occurs x t1 || occurs x t2 | _ -> t = x
   
-  and newTV : unit -> t =
+  and freshTV : unit -> t =
     let counter = ref (-1) in
     fun _ ->
       counter := !counter + 1;
@@ -138,7 +138,7 @@ let infer_type (expr : expr) =
     and handle gv instd original =
       match instd with
       | [] ->
-          let ntv = newTV () in
+          let ntv = freshTV () in
           (ntv, (gv, ntv) :: original)
       | (gv', tv') :: instd' ->
           if gv' = gv then (tv', original) else handle gv instd' original
@@ -147,45 +147,5 @@ let infer_type (expr : expr) =
   
   in
   let gamma, t, cs = gather_constraints [] expr [] in
-  let t' = generalize (free_type_variables (List.map snd gamma)) (unify_types t cs) in
-  Printf.printf "Type of %s is %s" (string_of_expr expr) (string_of_type t');
-  if gamma = [] then Printf.printf "\n"
-  else (
-    Printf.printf " with env:";
-    List.iter
-      (fun (x, t) -> Printf.printf " (%s : %s)" x (string_of_type t))
-      gamma;
-    Printf.printf "\n" );
-  t'
-
-let some_terms =
-  [
-    Lam ("x", V "x");
-    Lam ("x", App (V "x", I 2));
-    Lam ("x", App (V "x", V "x"));
-    Lam ("y", App (Lam ("x", V "x"), I 1));
-    Lam ("x", Lam ("y", V "x"));
-    Lam ("y", App (Lam ("x", App (V "y", V "x")), I 1));
-    Lam ("x", App (Lam ("y", V "y"), App (V "x", I 42)));
-    Lam ("x", Lam ("y", Lam ("z", App (App (V "x", V "z"), App (V "y", V "z")))));
-    Let
-      ( "f",
-        Lam ("x", App (V "x", I 1)),
-        Lam ("y", App (V "f", Lam ("x", App (V "y", V "x")))) );
-    Let
-      ( "g",
-        Lam ("x", App (V "x", App (V "x", I 1))),
-        Let
-          ( "f",
-            Lam ("x", App (V "x", I 1)),
-            Lam ("y", App (V "g", App (V "f", Lam ("x", App (V "y", V "x")))))
-          ) );
-    Fun ("f", "x", App (V "f", App (V "f", I 1)));
-    Fun ("fix", "f", App (V "f", App (V "fix", V "f")));
-    App
-      ( Fun ("fix", "f", App (V "f", App (V "fix", V "f"))),
-        Lam ("x", Lam ("y", Lam ("z", I 2))) );
-    Let ("id", Lam ("x", V "x"), App (V "id", V "id"));
-  ]
-
-let _ = List.map infer_type some_terms
+  let t' = generalize (free_type_variables (List.map snd gamma)) (unify_types t cs)
+  in (gamma, t')

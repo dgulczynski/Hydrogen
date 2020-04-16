@@ -11,7 +11,7 @@ Type inference playground.
 <img src="https://render.githubusercontent.com/render/math?math=\text{expr} \ni e \Coloneqq x \mid n \mid \lambda x . e \mid \text{fun} f x . e \mid e \: e \mid \text{let} x = e \: \text{in} \: e">
 
 # Usage
-Simply running `ocaml hydrogen.ml` should result in output like:
+Simply running `ocaml examples.ml` should result in output like:
 ```
 Type of λx. x is 't0 -> 't0
 Type of λx. x 2 is (Int -> 't1) -> 't1
