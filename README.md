@@ -24,7 +24,6 @@ Type of λx. λy. λz. (x z) (y z) is ('c -> 'e -> 'f) -> ('c -> 'e) -> 'c -> 'f
 
 Let bindings:
 Type of let f = λx. x 1 in λy. f (λx. y x) is (Int -> 'g) -> 'g with env: (f : (Int -> 'b) -> 'b)
-Type of let f = λx. x 1 in λy. f (λx. y x) is (Int -> 'g) -> 'g with env: (f : (Int -> 'b) -> 'b)
 Type of let g = λx. x (x 1) in let f = λx. x 1 in λy. g (f (λx. y x)) is (Int -> Int -> Int) -> Int with env: (f : (Int -> 'e) -> 'e) (g : (Int -> Int) -> Int)
 
 Ill-typed example:
@@ -33,8 +32,7 @@ Type of λx. x x is ILL-TYPED
 
 Recursive functions:
 Type of fun f x. f (f 1) is Int -> Int
-Type of fun fix f. f (fix f) is ('c -> 'c) -> 'c
-Type of (fun fix f. f (fix f)) (λx. λy. λz. 2) is 'f -> 'g -> Int
+Type of let fix = fun fix f. f (fix f) in fix (λx. λy. λz. 2) is 'g -> 'h -> Int with env: (fix : ('c -> 'c) -> 'c)
 
 Parametric polymorphism:
 Type of let id = λx. x in id id is 'c -> 'c with env: (id : 'a -> 'a)
