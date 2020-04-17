@@ -42,12 +42,17 @@ let rec string_of_expr (e : expr) : string =
       "let " ^ var ^ " = " ^ string_of_expr body ^ " in " ^ string_of_expr expr
   | Fun (f, x, body) -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr body
 
+let rec type_of_var (gamma : (var * t) list) (v : var) =
+  match gamma with
+  | [] -> raise (Failure ("Unbound variable " ^ v))
+  | (v', t') :: gamma' -> if v' = v then t' else type_of_var gamma' v
+
 let infer_type (expr : expr) =
   let rec gather_constraints (gamma : (var * t) list) (expr : expr) (cs : (t * t) list) :
       (var * t) list * t * (t * t) list =
     match expr with
     | I _ -> (gamma, Int, cs)
-    | V v -> (gamma, instantiate (snd (List.find (fun (v', t') -> v' = v) gamma)), cs)
+    | V v -> (gamma, instantiate (type_of_var gamma v), cs)
     | Lam (x, e) ->
         let tx = freshTV () in
         let _, te, cse = gather_constraints ((x, tx) :: gamma) e cs in
@@ -64,10 +69,7 @@ let infer_type (expr : expr) =
         (gamma, tfx, (tf, Arrow (tx, tfx)) :: csx)
     | Let (x, e, e') ->
         let _, te, cse = gather_constraints gamma e cs in
-        gather_constraints
-          ( (x, generalize (free_type_variables (List.map snd gamma)) (unify_types te cse))
-          :: gamma )
-          e' cs
+        gather_constraints ((x, generalize gamma (unify_types te cse)) :: gamma) e' cs
   
   and unify_types (t : t) (cs : (t * t) list) : t =
     match cs with
@@ -107,39 +109,39 @@ let infer_type (expr : expr) =
       counter := !counter + 1 ;
       TV (Printf.sprintf "%c" (char_of_int !counter))
   
-  and generalize (ftv : tvar list) (t : t) : t =
-    match t with
-    | Arrow (t1, t2) -> Arrow (generalize ftv t1, generalize ftv t2)
-    | TV tv -> if List.mem tv ftv then TV tv else GV tv
-    | _ -> t
-
-  and free_type_variables (ts : t list) =
-    match ts with
-    | [] -> []
-    | Arrow (t1, t2) :: ts' -> free_type_variables (t1 :: t2 :: ts')
-    | TV tv :: ts' -> tv :: free_type_variables ts'
-    | _ :: ts' -> free_type_variables ts'
+  and generalize (gamma : (var * t) list) (t : t) : t =
+    let rec generalize' (ftv : tvar list) (t : t) : t =
+      match t with
+      | Arrow (t1, t2) -> Arrow (generalize' ftv t1, generalize' ftv t2)
+      | TV tv -> if List.mem tv ftv then TV tv else GV tv
+      | _ -> t
+    and free_type_variables (ts : t list) : tvar list =
+      match ts with
+      | [] -> []
+      | Arrow (t1, t2) :: ts' -> free_type_variables (t1 :: t2 :: ts')
+      | TV tv :: ts' -> tv :: free_type_variables ts'
+      | _ :: ts' -> free_type_variables ts'
+    in
+    generalize' (free_type_variables (List.map snd gamma)) t
   
-  and instantiate (t : t) =
-    let rec aux t instd =
+  and instantiate (t : t) : t =
+    let rec instantiate' t instd =
       match t with
       | Arrow (t1, t2) ->
-          let t1', instd' = aux t1 instd in
-          let t2', instd'' = aux t2 instd' in
+          let t1', instd' = instantiate' t1 instd in
+          let t2', instd'' = instantiate' t2 instd' in
           (Arrow (t1', t2'), instd'')
-      | GV gv -> handle gv instd instd
+      | GV gv -> (
+        match List.find_opt (fun (gv', _) -> gv' = gv) instd with
+        | Some (_, t) -> (t, instd)
+        | None ->
+            let ntv = freshTV () in
+            (ntv, (gv, ntv) :: instd) )
       | _ -> (t, instd)
-    and handle gv instd original =
-      match instd with
-      | [] ->
-          let ntv = freshTV () in
-          (ntv, (gv, ntv) :: original)
-      | (gv', tv') :: instd' ->
-          if gv' = gv then (tv', original) else handle gv instd' original
     in
-    fst (aux t [])
+    fst (instantiate' t [])
   
   in
   let gamma, t, cs = gather_constraints [] expr [] in
-  let t' = generalize (free_type_variables (List.map snd gamma)) (unify_types t cs) in
+  let t' = generalize gamma (unify_types t cs) in
   (gamma, t')
