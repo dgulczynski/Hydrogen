@@ -69,7 +69,7 @@ let infer_type (expr : expr) =
         (gamma, tfx, (tf, Arrow (tx, tfx)) :: csx)
     | Let (x, e, e') ->
         let _, te, cse = gather_constraints gamma e cs in
-        gather_constraints ((x, generalize gamma (unify_types te cse)) :: gamma) e' cs
+        gather_constraints ((x, generalize gamma (unify_types te cse)) :: gamma) e' cse     
   
   and unify_types (t : t) (cs : (t * t) list) : t =
     match cs with

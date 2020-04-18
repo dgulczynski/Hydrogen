@@ -50,3 +50,7 @@ let _ =
 
 let _ =
   print_examples "Parametric polymorphism" [Let ("id", Lam ("x", V "x"), V "id" @ V "id")]
+
+let _ =
+  print_examples "Parametric polymorphism with bugs"
+    [Lam ("x", Lam ("y", V "y") @ V "x" @ I 1); Lam ("x", Let ("y", V "x" @ I 1, V "y"))]
