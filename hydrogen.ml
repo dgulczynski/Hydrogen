@@ -3,17 +3,16 @@ type var = string
 type tvar = string
 
 type expr =
-  | App of expr * expr
-  | Lam of var * expr
   | I of int
   | V of var
-  | Let of var * expr * expr
+  | Lam of var * expr
   | Fun of var * var * expr
+  | Let of var * expr * expr
+  | App of expr * expr
 
 type t = Int | Arrow of t * t | TV of tvar | GV of tvar | Bad
 
-let rec string_of_type (t : t) : string =
-  match t with
+let rec string_of_type : t -> string = function
   | Int -> "Int"
   | Arrow (t1, t2) -> (
     match t1 with
@@ -23,24 +22,19 @@ let rec string_of_type (t : t) : string =
   | GV tv -> "'" ^ tv
   | Bad -> "ILL-TYPED"
 
-let rec string_of_expr (e : expr) : string =
-  match e with
+let rec string_of_expr : expr -> string = function
   | I i -> string_of_int i
   | V v -> v
-  | Lam (var, e') -> "λ" ^ var ^ ". " ^ string_of_expr e'
-  | App (e', e'') -> (
-      ( match e' with
-      | I i -> string_of_int i
-      | V v -> v
-      | _ -> "(" ^ string_of_expr e' ^ ")" )
-      ^ " " ^
-      match e'' with
-      | I i -> string_of_int i
-      | V v -> v
-      | _ -> "(" ^ string_of_expr e'' ^ ")" )
-  | Let (var, body, expr) ->
-      "let " ^ var ^ " = " ^ string_of_expr body ^ " in " ^ string_of_expr expr
-  | Fun (f, x, body) -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr body
+  | Lam (x, e) -> "λ" ^ x ^ ". " ^ string_of_expr e
+  | Fun (f, x, e) -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
+  | Let (x, e, e') -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
+  | App (f, x) ->
+      let aux = function
+        | I i -> string_of_int i
+        | V v -> v
+        | e -> "(" ^ string_of_expr e ^ ")"
+      in
+      aux f ^ " " ^ aux x
 
 let rec type_of_var (gamma : (var * t) list) (v : var) =
   match gamma with
@@ -62,24 +56,24 @@ let infer_type (expr : expr) =
         let tf = Arrow (tx, tfx) in
         let _, te, cse = gather_constraints ((f, tf) :: (x, tx) :: gamma) e cs in
         (gamma, Arrow (tx, te), (tf, Arrow (tx, te)) :: cse)
+    | Let (x, e, e') ->
+        let _, te, cse = gather_constraints gamma e cs in
+        let gamma' = List.map (fun (var, t) -> (var, unify_types t cse)) gamma in
+        gather_constraints ((x, generalize gamma' (unify_types te cse)) :: gamma') e' cse
     | App (f, x) ->
         let _, tf, csf = gather_constraints gamma f cs in
         let _, tx, csx = gather_constraints gamma x csf in
         let tfx = freshTV () in
         (gamma, tfx, (tf, Arrow (tx, tfx)) :: csx)
-    | Let (x, e, e') ->
-        let _, te, cse = gather_constraints gamma e cs in
-        let gamma' = List.map (fun (var, t) -> (var, unify_types t cse)) gamma in
-        gather_constraints ((x, generalize gamma' (unify_types te cse)) :: gamma') e' cse
   
   and unify_types (t : t) (cs : (t * t) list) : t =
     match cs with
     | [] -> t
+    | (t1, t2) :: cs when t1 = t2 -> unify_types t cs
     | (Arrow (t1, t2), Arrow (t1', t2')) :: cs ->
         unify_types t ((t1, t1') :: (t2, t2') :: cs)
     | (TV a, t2) :: cs ->
-        if TV a = t2 then unify_types t cs
-        else if occurs (TV a) t2 then (
+        if occurs (TV a) t2 then (
           Printf.printf "ERROR: Cannot construct infinite type %s ~ %s\n" a
             (string_of_type t2) ;
           Bad )
@@ -89,11 +83,9 @@ let infer_type (expr : expr) =
             (List.map (fun (c1, c2) -> (substitute c1, substitute c2)) cs)
     | (t1, TV a) :: cs -> unify_types t ((TV a, t1) :: cs)
     | (t1, t2) :: cs ->
-        if t1 = t2 then unify_types t cs
-        else (
-          Printf.printf "This probably shouldn't happen: constraint of type %s ~ %s\n"
-            (string_of_type t1) (string_of_type t2) ;
-          unify_types t cs )
+        Printf.printf "This probably shouldn't happen: constraint of type %s ~ %s\n"
+          (string_of_type t1) (string_of_type t2) ;
+        unify_types t cs
   
   and subst (x : tvar) (v : t) (t : t) : t =
     match t with
