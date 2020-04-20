@@ -36,8 +36,6 @@ Type of let fix = fun fix f. f (fix f) in fix (λx. λy. λz. 2) is g -> h -> In
 
 Parametric polymorphism:
 Type of let id = λx. x in id id is c -> c with env: (id : 'a -> 'a)
-
-Parametric polymorphism without bugs:
 Type of λx. (λy. y) (x 1) is (Int -> d) -> d
 Type of λx. let y = x 1 in y is (Int -> b) -> b
 ```
