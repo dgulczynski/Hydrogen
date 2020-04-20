@@ -3,8 +3,8 @@ type var = string
 type tvar = string
 
 type expr =
-  | I of int
-  | V of var
+  | I   of int
+  | V   of var
   | Lam of var * expr
   | Fun of var * var * expr
   | Let of var * expr * expr
@@ -13,45 +13,45 @@ type expr =
 type t = Int | Arrow of t * t | TV of tvar | GV of tvar | Bad
 
 let rec string_of_type : t -> string = function
-  | Int -> "Int"
+  | Int            -> "Int"
   | Arrow (t1, t2) -> (
     match t1 with
     | Arrow _ -> "(" ^ string_of_type t1 ^ ") -> " ^ string_of_type t2
-    | _ -> string_of_type t1 ^ " -> " ^ string_of_type t2 )
-  | TV tv -> tv
-  | GV tv -> "'" ^ tv
-  | Bad -> "ILL-TYPED"
+    | _       -> string_of_type t1 ^ " -> " ^ string_of_type t2 )
+  | TV tv          -> tv
+  | GV tv          -> "'" ^ tv
+  | Bad            -> "ILL-TYPED"
 
 let rec string_of_expr : expr -> string = function
-  | I i -> string_of_int i
-  | V v -> v
-  | Lam (x, e) -> "λ" ^ x ^ ". " ^ string_of_expr e
-  | Fun (f, x, e) -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
+  | I i            -> string_of_int i
+  | V v            -> v
+  | Lam (x, e)     -> "λ" ^ x ^ ". " ^ string_of_expr e
+  | Fun (f, x, e)  -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
   | Let (x, e, e') -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
-  | App (f, x) ->
+  | App (f, x)     ->
       let aux = function
         | I i -> string_of_int i
         | V v -> v
-        | e -> "(" ^ string_of_expr e ^ ")"
+        | e   -> "(" ^ string_of_expr e ^ ")"
       in
       aux f ^ " " ^ aux x
 
 let rec type_of_var (gamma : (var * t) list) (v : var) =
   match gamma with
-  | [] -> raise (Failure ("Unbound variable " ^ v))
+  | []                 -> raise (Failure ("Unbound variable " ^ v))
   | (v', t') :: gamma' -> if v' = v then t' else type_of_var gamma' v
 
 let infer_type (expr : expr) =
   let rec gather_constraints (gamma : (var * t) list) (expr : expr) (cs : (t * t) list) :
       (var * t) list * t * (t * t) list =
     match expr with
-    | I _ -> (gamma, Int, cs)
-    | V v -> (gamma, instantiate (type_of_var gamma v), cs)
-    | Lam (x, e) ->
+    | I _            -> (gamma, Int, cs)
+    | V v            -> (gamma, instantiate (type_of_var gamma v), cs)
+    | Lam (x, e)     ->
         let tx = freshTV () in
         let _, te, cse = gather_constraints ((x, tx) :: gamma) e cs in
         (gamma, Arrow (tx, te), cse)
-    | Fun (f, x, e) ->
+    | Fun (f, x, e)  ->
         let tx = freshTV () and tfx = freshTV () in
         let tf = Arrow (tx, tfx) in
         let _, te, cse = gather_constraints ((f, tf) :: (x, tx) :: gamma) e cs in
@@ -60,7 +60,7 @@ let infer_type (expr : expr) =
         let _, te, cse = gather_constraints gamma e cs in
         let gamma' = List.map (fun (var, t) -> (var, unify_types t cse)) gamma in
         gather_constraints ((x, generalize gamma' (unify_types te cse)) :: gamma') e' cse
-    | App (f, x) ->
+    | App (f, x)     ->
         let _, tf, csf = gather_constraints gamma f cs in
         let _, tx, csx = gather_constraints gamma x csf in
         let tfx = freshTV () in
@@ -90,8 +90,8 @@ let infer_type (expr : expr) =
   and subst (x : tvar) (v : t) (t : t) : t =
     match t with
     | Arrow (t1, t2) -> Arrow (subst x v t1, subst x v t2)
-    | TV tv -> if x = tv then v else t
-    | _ -> t
+    | TV tv          -> if x = tv then v else t
+    | _              -> t
   
   and occurs (x : t) (t : t) : bool =
     match t with Arrow (t1, t2) -> occurs x t1 || occurs x t2 | _ -> t = x
@@ -106,14 +106,14 @@ let infer_type (expr : expr) =
     let rec generalize' (ftv : tvar list) (t : t) : t =
       match t with
       | Arrow (t1, t2) -> Arrow (generalize' ftv t1, generalize' ftv t2)
-      | TV tv -> if List.mem tv ftv then TV tv else GV tv
-      | _ -> t
+      | TV tv          -> if List.mem tv ftv then TV tv else GV tv
+      | _              -> t
     and free_type_variables (ts : t list) : tvar list =
       match ts with
-      | [] -> []
+      | []                    -> []
       | Arrow (t1, t2) :: ts' -> free_type_variables (t1 :: t2 :: ts')
-      | TV tv :: ts' -> tv :: free_type_variables ts'
-      | _ :: ts' -> free_type_variables ts'
+      | TV tv :: ts'          -> tv :: free_type_variables ts'
+      | _ :: ts'              -> free_type_variables ts'
     in
     generalize' (free_type_variables (List.map snd gamma)) t
   
@@ -124,13 +124,13 @@ let infer_type (expr : expr) =
           let t1', instd' = instantiate' t1 instd in
           let t2', instd'' = instantiate' t2 instd' in
           (Arrow (t1', t2'), instd'')
-      | GV gv -> (
+      | GV gv          -> (
         match List.find_opt (fun (gv', _) -> gv' = gv) instd with
         | Some (_, t) -> (t, instd)
-        | None ->
+        | None        ->
             let ntv = freshTV () in
             (ntv, (gv, ntv) :: instd) )
-      | _ -> (t, instd)
+      | _              -> (t, instd)
     in
     fst (instantiate' t [])
   

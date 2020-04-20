@@ -2,3 +2,7 @@ profile = ocamlformat
 break-cases = fit
 margin = 90
 wrap-comments = true
+nested-match = align
+align-cases
+align-constructors-decl
+align-variants-decl
