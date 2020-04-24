@@ -1,6 +1,6 @@
 profile = ocamlformat
 break-cases = fit
-margin = 90
+margin = 94
 wrap-comments = true
 nested-match = align
 align-cases

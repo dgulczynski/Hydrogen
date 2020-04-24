@@ -10,11 +10,13 @@ type expr =
   | Let of var * expr * expr
   | App of expr * expr
 
-type t = Int | Arrow of t * t | TV of tvar | GV of tvar | Bad
+type typ = Int | Arrow of typ * typ | TV of tvar | GV of tvar | Bad
+
+type env = (var * typ) list
 
 exception IllTyped of string
 
-let rec string_of_type : t -> string = function
+let rec string_of_type : typ -> string = function
   | Int            -> "Int"
   | Arrow (t1, t2) -> (
     match t1 with
@@ -39,10 +41,8 @@ let rec string_of_expr : expr -> string = function
       aux f ^ " " ^ aux x
 
 let infer_type (expr : expr) =
-  let tbl : (tvar, t) Hashtbl.t = Hashtbl.create 10 in
-  
-  let rec gather_constraints (gamma : (var * t) list) (expr : expr) (cs : (t * t) list) :
-      (var * t) list * t * (t * t) list =
+  let rec gather_constraints (gamma : env) (expr : expr) (cs : (typ * typ) list) :
+      env * typ * (typ * typ) list =
     match expr with
     | I _            -> (gamma, Int, cs)
     | V v            -> (gamma, instantiate (type_of_var gamma v), cs)
@@ -64,12 +64,12 @@ let infer_type (expr : expr) =
         let tfx = freshTV () in
         (gamma, tfx, (tf, Arrow (tx, tfx)) :: csx)
   
-  and type_of_var (gamma : (var * t) list) (v : var) =
-    match gamma with
-    | []                 -> raise (IllTyped ("Unbound variable " ^ v))
-    | (v', t') :: gamma' -> if v' = v then find t' else type_of_var gamma' v
+  and type_of_var (gamma : env) (v : var) =
+    match List.assoc_opt v gamma with
+    | None   -> raise (IllTyped ("Unbound variable " ^ v))
+    | Some t -> find t
   
-  and find = function
+  and find : typ -> typ = function
     | Int            -> Int
     | GV gv          -> GV gv
     | Arrow (t1, t2) -> Arrow (find t1, find t2)
@@ -86,41 +86,38 @@ let infer_type (expr : expr) =
           if t' == t'' then t'' else (Hashtbl.replace tbl tv t'' ; t'') )
     | t              -> t
   
-  and unify_types (t : t) (cs : (t * t) list) : t =
-    let rec union (t1, t2) =
-      match (find t1, find t2) with
-      | t1', t2' when t1' = t2' -> ()
-      | Arrow (a1, b1), Arrow (a2, b2) ->
-          union (a1, a2) ;
-          union (b1, b2)
-      | TV a, t' | t', TV a ->
-          if occurs (TV a) t' then
-            raise
-              (IllTyped ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
-          else Hashtbl.replace tbl a t'
-      | t1', t2' ->
-          raise
-            (IllTyped
-               ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
-    in
-    List.iter union cs ; find t
+  and union (t1, t2) =
+    match (find t1, find t2) with
+    | t1', t2' when t1' = t2' -> ()
+    | Arrow (a1, b1), Arrow (a2, b2) ->
+        union (a1, a2) ;
+        union (b1, b2)
+    | TV a, t' | t', TV a ->
+        if occurs (TV a) t' then
+          raise (IllTyped ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
+        else Hashtbl.replace tbl a t'
+    | t1', t2' ->
+        raise
+          (IllTyped ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
   
-  and occurs (x : t) (t : t) : bool =
+  and unify_types (t : typ) (cs : (typ * typ) list) : typ = List.iter union cs ; find t
+  
+  and occurs (x : typ) (t : typ) : bool =
     match find t with Arrow (t1, t2) -> occurs x t1 || occurs x t2 | t' -> t' = find x
   
-  and freshTV : unit -> t =
+  and freshTV : unit -> typ =
     let counter = ref (int_of_char 'a' - 1) in
     fun _ ->
       counter := !counter + 1 ;
       TV (Printf.sprintf "%c" (char_of_int !counter))
   
-  and generalize (gamma : (var * t) list) (t : t) : t =
-    let rec generalize' (ftv : tvar list) (t : t) : t =
+  and generalize (gamma : env) (t : typ) : typ =
+    let rec generalize' ftv t =
       match t with
       | Arrow (t1, t2) -> Arrow (generalize' ftv t1, generalize' ftv t2)
       | TV tv          -> if List.mem tv ftv then TV tv else GV tv
       | _              -> t
-    and free_type_variables : t list -> tvar list = function
+    and free_type_variables = function
       | []      -> []
       | t :: ts ->
       match find t with
@@ -130,7 +127,7 @@ let infer_type (expr : expr) =
     in
     generalize' (free_type_variables (List.map snd gamma)) t
   
-  and instantiate (t : t) : t =
+  and instantiate (t : typ) : typ =
     let rec instantiate' t instd =
       match t with
       | Arrow (t1, t2) ->
@@ -138,19 +135,20 @@ let infer_type (expr : expr) =
           let t2', instd'' = instantiate' t2 instd' in
           (Arrow (t1', t2'), instd'')
       | GV gv          -> (
-        match List.find_opt (fun (gv', _) -> gv' = gv) instd with
-        | Some (_, t) -> (t, instd)
-        | None        ->
+        match List.assoc_opt gv instd with
+        | Some t -> (t, instd)
+        | None   ->
             let ntv = freshTV () in
             (ntv, (gv, ntv) :: instd) )
       | _              -> (t, instd)
     in
     fst (instantiate' t [])
   
-  in
+  and tbl = Hashtbl.create 10 in
+  
   try
     let gamma, t, cs = gather_constraints [] expr [] in
     (gamma, unify_types t cs)
   with IllTyped e ->
-    Printf.printf "Type inference error: %s\n" e ;
+    print_string ("Type inference error: " ^ e ^ "\n") ;
     ([], Bad)

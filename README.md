@@ -27,7 +27,7 @@ Type of let f = λx. x 1 in λy. f (λx. y x) is (Int -> g) -> g with env: (f : 
 Type of let g = λx. x (x 1) in let f = λx. x 1 in λy. g (f (λx. y x)) is (Int -> Int -> Int) -> Int with env: (f : (Int -> 'e) -> 'e) (g : (Int -> Int) -> Int)
 
 Ill-typed example:
-ERROR: Cannot construct infinite type a ~ a -> b
+Type inference error: The type variable a occurs inside a -> b
 Type of λx. x x is ILL-TYPED
 
 Recursive functions:
