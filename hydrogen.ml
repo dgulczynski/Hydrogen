@@ -44,28 +44,29 @@ let rec string_of_expr : expr -> string = function
       aux f ^ " " ^ aux x
 
 let infer_type (expr : expr) =
-  let rec gather_constraints (gamma : env) (expr : expr) (cs : (typ * typ) list) :
-      env * typ * (typ * typ) list =
-    match expr with
-    | I _            -> (gamma, Int, cs)
-    | V v            -> (gamma, instantiate (type_of_var gamma v), cs)
+  let rec m (gamma : env) (t : typ) : expr -> env = function
+    | I _            ->
+        union (t, Int) ;
+        gamma
+    | V v            ->
+        union (instantiate (type_of_var gamma v), t) ;
+        gamma
     | Lam (x, e)     ->
-        let tx = freshTV () in
-        let _, te, cse = gather_constraints ((x, tx) :: gamma) e cs in
-        (gamma, Arrow (tx, te), cse)
+        let tx = freshTV () and te = freshTV () in
+        union (t, Arrow (tx, te)) ;
+        let _ = m ((x, tx) :: gamma) te e in
+        gamma
     | Fun (f, x, e)  ->
-        let tx = freshTV () and tfx = freshTV () in
-        let tf = Arrow (tx, tfx) in
-        let _, te, cse = gather_constraints ((f, tf) :: (x, tx) :: gamma) e cs in
-        (gamma, Arrow (tx, te), (tf, Arrow (tx, te)) :: cse)
+        let _ = m ((f, t) :: gamma) t (Lam (x, e)) in
+        gamma
     | Let (x, e, e') ->
-        let _, te, cse = gather_constraints gamma e cs in
-        gather_constraints ((x, generalize gamma (unify_types te cse)) :: gamma) e' []
+        let te = freshTV () in
+        let _ = m gamma te e in
+        m ((x, generalize gamma (find te)) :: gamma) t e'
     | App (f, x)     ->
-        let _, tf, csf = gather_constraints gamma f cs in
-        let _, tx, csx = gather_constraints gamma x csf in
-        let tfx = freshTV () in
-        (gamma, tfx, (tf, Arrow (tx, tfx)) :: csx)
+        let tx = freshTV () in
+        let gamma' = m gamma (Arrow (tx, t)) f in
+        m gamma' tx x
   
   and type_of_var (gamma : env) (v : var) : typ =
     match List.assoc_opt v gamma with
@@ -155,8 +156,9 @@ let infer_type (expr : expr) =
   
   in
   try
-    let gamma, t, cs = gather_constraints [] expr [] in
-    (gamma, unify_types t cs)
+    let t = TV (ref (Free "_")) in
+    let gamma = m [] t expr in
+    (gamma, find t)
   with IllTyped e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
     ([], Bad)
