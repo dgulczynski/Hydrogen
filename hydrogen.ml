@@ -24,7 +24,7 @@ let rec string_of_type : typ -> string = function
     match t1 with
     | Arrow _ -> "(" ^ string_of_type t1 ^ ") -> " ^ string_of_type t2
     | _       -> string_of_type t1 ^ " -> " ^ string_of_type t2 )
-  | TV {contents= Free v}  -> v
+  | TV {contents= Free a}  -> a
   | TV {contents= Bound t} -> string_of_type t
   | GV v                   -> "'" ^ v
   | Bad                    -> "ILL-TYPED"
@@ -67,7 +67,7 @@ let infer_type (expr : expr) =
         let tfx = freshTV () in
         (gamma, tfx, (tf, Arrow (tx, tfx)) :: csx)
   
-  and type_of_var (gamma : env) (v : var) =
+  and type_of_var (gamma : env) (v : var) : typ =
     match List.assoc_opt v gamma with
     | None   -> raise (IllTyped ("Free variable " ^ v))
     | Some t -> find t
@@ -82,7 +82,7 @@ let infer_type (expr : expr) =
         t'
     | t                              -> t
   
-  and union (t1, t2) =
+  and union ((t1, t2) : typ * typ) : unit =
     match (find t1, find t2) with
     | t1', t2' when t1' = t2' -> ()
     | Arrow (a1, b1), Arrow (a2, b2) ->
@@ -90,39 +90,49 @@ let infer_type (expr : expr) =
         union (b1, b2)
     | TV {contents= Bound t}, t' | t', TV {contents= Bound t} -> union (t, t')
     | TV ({contents= Free a} as tv), t' | t', TV ({contents= Free a} as tv) ->
-        if occurs (TV tv) t' then
+        if occurs a t' then
           raise (IllTyped ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
         else tv := Bound t'
     | t1', t2' ->
         raise
           (IllTyped ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
   
-  and occurs (x : typ) (t : typ) : bool =
-    match find t with Arrow (t1, t2) -> occurs x t1 || occurs x t2 | t' -> t' = find x
+  and occurs (x : identifier) : typ -> bool = function
+    | Arrow (t1, t2)        -> occurs x t1 || occurs x t2
+    | TV {contents= Free a} -> x = a
+    | _                     -> false
   
   and freshTV : unit -> typ =
     let counter = ref (int_of_char 'a' - 1) in
     fun _ ->
       counter := !counter + 1 ;
-      TV (ref (Free (Printf.sprintf "%c" (char_of_int !counter))))
+      TV (ref (Free (Printf.sprintf "_%c" (char_of_int !counter))))
   
   and unify_types (t : typ) (cs : (typ * typ) list) : typ = List.iter union cs ; find t
   
   and generalize (gamma : env) (t : typ) : typ =
-    let rec generalize' ftv t =
-      match t with
-      | Arrow (t1, t2)         -> Arrow (generalize' ftv t1, generalize' ftv t2)
-      | TV {contents= Free tv} -> if List.mem tv ftv then t else GV tv
-      | TV {contents= Bound t} -> generalize' ftv t
-      | _                      -> t
+    let rec generalize' ftv = function
+      | Arrow (t1, t2)                -> Arrow (generalize' ftv t1, generalize' ftv t2)
+      | TV ({contents= Free a} as tv) ->
+          if List.mem a ftv then t
+          else
+            let gv = freshGV () in
+            tv := Bound gv ;
+            gv
+      | TV {contents= Bound t}        -> generalize' ftv t
+      | t                             -> t
     and free_type_variables = function
       | []      -> []
       | t :: ts ->
       match find t with
-      | Arrow (t1, t2)         -> free_type_variables (t1 :: t2 :: ts)
-      | TV {contents= Free tv} -> tv :: free_type_variables ts
-      | TV {contents= Bound t} -> free_type_variables (t :: ts)
-      | _                      -> free_type_variables ts
+      | Arrow (t1, t2)        -> free_type_variables (t1 :: t2 :: ts)
+      | TV {contents= Free a} -> a :: free_type_variables ts
+      | _                     -> free_type_variables ts
+    and freshGV =
+      let counter = ref (int_of_char 'a' - 1) in
+      fun _ ->
+        counter := !counter + 1 ;
+        GV (Printf.sprintf "%c" (char_of_int !counter))
     in
     generalize' (free_type_variables (List.map snd gamma)) t
   
