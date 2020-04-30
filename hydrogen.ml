@@ -2,17 +2,18 @@ type identifier = string
 
 type var = identifier
 
-type expr =
-  | I   of int
-  | V   of var
-  | Lam of var * expr
-  | Fun of var * var * expr
-  | Let of var * expr * expr
-  | App of expr * expr
-
 type typ = Int | Arrow of typ * typ | TV of tvar ref | GV of identifier | Bad
 
 and tvar = Free of identifier | Bound of typ
+
+type expr =
+  | I       of int
+  | V       of var
+  | Lam     of var * expr
+  | Fun     of var * var * expr
+  | Let     of var * expr * expr
+  | App     of expr * expr
+  | Annoted of expr * typ
 
 type env = (var * typ) list
 
@@ -42,31 +43,37 @@ let rec string_of_expr : expr -> string = function
         | e   -> "(" ^ string_of_expr e ^ ")"
       in
       aux f ^ " " ^ aux x
+  | Annoted (e, t) -> "(" ^ string_of_expr e ^ " : " ^ string_of_type t ^ ")"
 
 let infer_type (expr : expr) =
   let rec m (gamma : env) (t : typ) : expr -> env = function
-    | I _            ->
+    | I _             ->
         union (t, Int) ;
         gamma
-    | V v            ->
+    | V v             ->
         union (instantiate (type_of_var gamma v), t) ;
         gamma
-    | Lam (x, e)     ->
+    | Lam (x, e)      ->
         let tx = freshTV () and te = freshTV () in
         union (t, Arrow (tx, te)) ;
         let _ = m ((x, tx) :: gamma) te e in
         gamma
-    | Fun (f, x, e)  ->
+    | Fun (f, x, e)   ->
         let _ = m ((f, t) :: gamma) t (Lam (x, e)) in
         gamma
-    | Let (x, e, e') ->
+    | Let (x, e, e')  ->
         let te = freshTV () in
         let _ = m gamma te e in
         m ((x, generalize gamma (find te)) :: gamma) t e'
-    | App (f, x)     ->
+    | App (f, x)      ->
         let tx = freshTV () in
         let gamma' = m gamma (Arrow (tx, t)) f in
         m gamma' tx x
+    | Annoted (e, t') ->
+        let t' = instantiate t' in
+        let _ = m gamma t' e in
+        union (t, t') ;
+        gamma
   
   and type_of_var (gamma : env) (v : var) : typ =
     match List.assoc_opt v gamma with

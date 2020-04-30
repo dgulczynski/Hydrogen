@@ -53,3 +53,11 @@ let _ =
     [ Let ("id", Lam ("x", V "x"), V "id" @: V "id")
     ; Lam ("x", Lam ("y", V "y") @: V "x" @: I 1)
     ; Lam ("x", Let ("y", V "x" @: I 1, V "y")) ]
+
+let _ =
+  print_examples "Annotations"
+    [ Let
+        ( "id"
+        , Lam ("x", V "x")
+        , Annoted (V "id", Arrow (GV "b", GV "b"))
+          @: Annoted (V "id", Arrow (GV "c", GV "c")) ) ]
