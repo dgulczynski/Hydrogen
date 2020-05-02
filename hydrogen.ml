@@ -38,9 +38,10 @@ let rec string_of_expr : expr -> string = function
   | Let (x, e, e') -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
   | App (f, x)     ->
       let aux = function
-        | I i -> string_of_int i
-        | V v -> v
-        | e   -> "(" ^ string_of_expr e ^ ")"
+        | I i            -> string_of_int i
+        | V v            -> v
+        | Annoted _ as e -> string_of_expr e
+        | e              -> "(" ^ string_of_expr e ^ ")"
       in
       aux f ^ " " ^ aux x
   | Annoted (e, t) -> "(" ^ string_of_expr e ^ " : " ^ string_of_type t ^ ")"
@@ -67,8 +68,8 @@ let infer_type (expr : expr) =
         m ((x, generalize gamma (find te)) :: gamma) t e'
     | App (f, x)      ->
         let tx = freshTV () in
-        let gamma' = m gamma (Arrow (tx, t)) f in
-        m gamma' tx x
+        let _ = m gamma (Arrow (tx, t)) f in
+        m gamma tx x
     | Annoted (e, t') ->
         let t' = instantiate t' in
         let _ = m gamma t' e in

@@ -39,6 +39,6 @@ Type of let id = λx. x in id id is _f -> _f with env: (id : 'a -> 'a)
 Type of λx. (λy. y) (x 1) is (Int -> _e) -> _e
 Type of λx. let y = x 1 in y is (Int -> _b) -> _b
 
-Annotations:
-Type of let id = λx. x in ((id : 'b -> 'b)) ((id : 'c -> 'c)) is _g -> _g with env: (id : 'a -> 'a)
+Type annotations:
+Type of let id = (λx. x : a -> a) in (id : b -> b) (id : Int -> Int) is Int -> Int with env: (id : 'a -> 'a)
 ```
