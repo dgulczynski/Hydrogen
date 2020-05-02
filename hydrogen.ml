@@ -36,14 +36,14 @@ let rec string_of_expr : expr -> string = function
   | Lam (x, e)     -> "λ" ^ x ^ ". " ^ string_of_expr e
   | Fun (f, x, e)  -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
   | Let (x, e, e') -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
-  | App (f, x)     ->
+  | App (e1, e2)   ->
       let aux = function
         | I i            -> string_of_int i
         | V v            -> v
         | Annoted _ as e -> string_of_expr e
         | e              -> "(" ^ string_of_expr e ^ ")"
       in
-      aux f ^ " " ^ aux x
+      aux e1 ^ " " ^ aux e2
   | Annoted (e, t) -> "(" ^ string_of_expr e ^ " : " ^ string_of_type t ^ ")"
 
 let infer_type (expr : expr) =
@@ -66,10 +66,10 @@ let infer_type (expr : expr) =
         let te = freshTV () in
         let _ = m gamma te e in
         m ((x, generalize gamma (find te)) :: gamma) t e'
-    | App (f, x)      ->
-        let tx = freshTV () in
-        let _ = m gamma (Arrow (tx, t)) f in
-        m gamma tx x
+    | App (e1, e2)    ->
+        let t2 = freshTV () in
+        let _ = m gamma (Arrow (t2, t)) e1 in
+        m gamma t2 e2
     | Annoted (e, t') ->
         let t' = instantiate t' in
         let _ = m gamma t' e in
@@ -121,15 +121,14 @@ let infer_type (expr : expr) =
   
   and generalize (gamma : env) (t : typ) : typ =
     let rec generalize' ftv = function
-      | Arrow (t1, t2)                -> Arrow (generalize' ftv t1, generalize' ftv t2)
-      | TV ({contents= Free a} as tv) ->
+      | Arrow (t1, t2) -> Arrow (generalize' ftv t1, generalize' ftv t2)
+      | TV ({contents= Free a} as tv) as t ->
           if List.mem a ftv then t
-          else
-            let gv = freshGV () in
-            tv := Bound gv ;
-            gv
-      | TV {contents= Bound t}        -> generalize' ftv t
-      | t                             -> t
+          else (
+            tv := Bound (freshGV ()) ;
+            t )
+      | TV {contents= Bound t} -> generalize' ftv t
+      | t -> t
     and free_type_variables = function
       | []      -> []
       | t :: ts ->
