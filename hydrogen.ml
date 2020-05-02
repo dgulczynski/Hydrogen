@@ -35,13 +35,13 @@ let rec string_of_expr : expr -> string = function
   | Lam (x, e)     -> "λ" ^ x ^ ". " ^ string_of_expr e
   | Fun (f, x, e)  -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
   | Let (x, e, e') -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
-  | App (f, x)     ->
+  | App (e1, e2)   ->
       let aux = function
         | I i -> string_of_int i
         | V v -> v
         | e   -> "(" ^ string_of_expr e ^ ")"
       in
-      aux f ^ " " ^ aux x
+      aux e1 ^ " " ^ aux e2
 
 let infer_type (expr : expr) =
   let rec gather_constraints (gamma : env) (expr : expr) (cs : (typ * typ) list) :
@@ -61,11 +61,11 @@ let infer_type (expr : expr) =
     | Let (x, e, e') ->
         let _, te, cse = gather_constraints gamma e cs in
         gather_constraints ((x, generalize gamma (unify_types te cse)) :: gamma) e' []
-    | App (f, x)     ->
-        let _, tf, csf = gather_constraints gamma f cs in
-        let _, tx, csx = gather_constraints gamma x csf in
-        let tfx = freshTV () in
-        (gamma, tfx, (tf, Arrow (tx, tfx)) :: csx)
+    | App (e1, e2)   ->
+        let _, t1, cs1 = gather_constraints gamma e1 cs in
+        let _, t2, cs2 = gather_constraints gamma e2 cs1 in
+        let t = freshTV () in
+        (gamma, t, (t1, Arrow (t2, t)) :: cs2)
   
   and type_of_var (gamma : env) (v : var) : typ =
     match List.assoc_opt v gamma with
@@ -112,15 +112,14 @@ let infer_type (expr : expr) =
   
   and generalize (gamma : env) (t : typ) : typ =
     let rec generalize' ftv = function
-      | Arrow (t1, t2)                -> Arrow (generalize' ftv t1, generalize' ftv t2)
-      | TV ({contents= Free a} as tv) ->
+      | Arrow (t1, t2) -> Arrow (generalize' ftv t1, generalize' ftv t2)
+      | TV ({contents= Free a} as tv) as t ->
           if List.mem a ftv then t
-          else
-            let gv = freshGV () in
-            tv := Bound gv ;
-            gv
-      | TV {contents= Bound t}        -> generalize' ftv t
-      | t                             -> t
+          else (
+            tv := Bound (freshGV ()) ;
+            t )
+      | TV {contents= Bound t} -> generalize' ftv t
+      | t -> t
     and free_type_variables = function
       | []      -> []
       | t :: ts ->
