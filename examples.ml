@@ -67,4 +67,9 @@ let _ =
             ( V "id"
             , let b = TV (ref (Free "b")) in
               b ->: b )
-          @: Annoted (V "id", Int ->: Int) ) ]
+          @: Annoted (V "id", Int ->: Int) )
+    ; (let a = TV (ref (Free "a")) and b = TV (ref (Free "b")) and c = TV (ref (Free "c")) in
+       TLam
+         ( "x"
+         , Arrow (a, Arrow (b, c))
+         , Lam ("y", TLam ("z", Int, Annoted ((V "x" @: V "z") @: V "y" @: V "z", c))) )) ]

@@ -14,6 +14,7 @@ type expr =
   | Let     of var * expr * expr
   | App     of expr * expr
   | Annoted of expr * typ
+  | TLam    of var * typ * expr
 
 type env = (var * typ) list
 
@@ -34,6 +35,7 @@ let rec string_of_expr : expr -> string = function
   | I i            -> string_of_int i
   | V v            -> v
   | Lam (x, e)     -> "λ" ^ x ^ ". " ^ string_of_expr e
+  | TLam (x, t, e) -> "λ(" ^ x ^ " : " ^ string_of_type t ^ "). " ^ string_of_expr e
   | Fun (f, x, e)  -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
   | Let (x, e, e') -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
   | App (e1, e2)   ->
@@ -52,10 +54,11 @@ let infer_type (expr : expr) =
         union (t, Int) ;
         gamma
     | V v             ->
-        union (instantiate (type_of_var gamma v), t) ;
+        union (t, instantiate (type_of_var gamma v)) ;
         gamma
-    | Lam (x, e)      ->
-        let tx = freshTV () and te = freshTV () in
+    | Lam (x, e)      -> m gamma t (TLam (x, freshTV (), e))
+    | TLam (x, tx, e) ->
+        let te = freshTV () in
         union (t, Arrow (tx, te)) ;
         let _ = m ((x, tx) :: gamma) te e in
         gamma
@@ -71,7 +74,6 @@ let infer_type (expr : expr) =
         let _ = m gamma (Arrow (t2, t)) e1 in
         m gamma t2 e2
     | Annoted (e, t') ->
-        let t' = instantiate t' in
         let _ = m gamma t' e in
         union (t, t') ;
         gamma
@@ -82,8 +84,6 @@ let infer_type (expr : expr) =
     | Some t -> find t
   
   and find : typ -> typ = function
-    | Int                            -> Int
-    | GV gv                          -> GV gv
     | Arrow (t1, t2)                 -> Arrow (find t1, find t2)
     | TV ({contents= Bound t} as tv) ->
         let t' = find t in

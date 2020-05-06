@@ -14,13 +14,13 @@ Type inference playground.
 Simply running `ocaml examples.ml` should result in output like:
 ```
 Simple examples:
-Type of λx. x is _b -> _b
+Type of λx. x is _a -> _a
 Type of λx. x 2 is (Int -> _b) -> _b
 Type of λy. (λx. x) 1 is _a -> Int
-Type of λx. λy. x is _d -> _c -> _d
+Type of λx. λy. x is _a -> _c -> _a
 Type of λy. (λx. y x) 1 is (Int -> _e) -> _e
-Type of λx. (λx. x) (x 42) is (Int -> _e) -> _e
-Type of λx. λy. λz. (x z) (y z) is (_i -> _g -> _f) -> (_i -> _g) -> _i -> _f
+Type of λx. (λx. x) (x 42) is (Int -> _d) -> _d
+Type of λx. λy. λz. (x z) (y z) is (_e -> _g -> _f) -> (_e -> _g) -> _e -> _f
 
 Let bindings:
 Type of let f = λx. x 1 in λy. f (λx. y x) is (Int -> _j) -> _j with env: (f : (Int -> 'a) -> 'a)
@@ -36,9 +36,10 @@ Type of let fix = fun fix f. f (fix f) in fix (λx. λy. λz. 2) is _j -> _l -> 
 
 Parametric polymorphism:
 Type of let id = λx. x in id id is _f -> _f with env: (id : 'a -> 'a)
-Type of λx. (λy. y) (x 1) is (Int -> _e) -> _e
-Type of λx. let y = x 1 in y is (Int -> _b) -> _b
+Type of λx. (λy. y) (x 1) is (Int -> _d) -> _d
+Type of λx. let y = x 1 in y is (Int -> _c) -> _c
 
 Type annotations:
 Type of let id = (λx. x : a -> a) in (id : b -> b) (id : Int -> Int) is Int -> Int with env: (id : 'a -> 'a)
+Type of λ(x : a -> b -> c). λy. λ(z : Int). ((x z) (y z) : c) is (Int -> b -> c) -> (Int -> b) -> Int -> c
 ```
