@@ -2,17 +2,20 @@ type identifier = string
 
 type var = identifier
 
-type expr =
-  | I   of int
-  | V   of var
-  | Lam of var * expr
-  | Fun of var * var * expr
-  | Let of var * expr * expr
-  | App of expr * expr
-
 type typ = Int | Arrow of typ * typ | TV of tvar ref | GV of identifier | Bad
 
 and tvar = Free of identifier | Bound of typ
+
+type expr =
+  | I       of int
+  | V       of var
+  | Lam     of var * expr
+  | Fun     of var * var * expr
+  | Let     of var * expr * expr
+  | App     of expr * expr
+  | Annoted of expr * typ
+  | TLam    of var * typ * expr
+  | TFun    of var * var * typ * expr
 
 type env = (var * typ) list
 
@@ -30,18 +33,23 @@ let rec string_of_type : typ -> string = function
   | Bad                    -> "ILL-TYPED"
 
 let rec string_of_expr : expr -> string = function
-  | I i            -> string_of_int i
-  | V v            -> v
-  | Lam (x, e)     -> "λ" ^ x ^ ". " ^ string_of_expr e
-  | Fun (f, x, e)  -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
-  | Let (x, e, e') -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
-  | App (e1, e2)   ->
+  | I i               -> string_of_int i
+  | V v               -> v
+  | Lam (x, e)        -> "λ" ^ x ^ ". " ^ string_of_expr e
+  | TLam (x, t, e)    -> "λ(" ^ x ^ " : " ^ string_of_type t ^ "). " ^ string_of_expr e
+  | Fun (f, x, e)     -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
+  | TFun (f, x, t, e) ->
+      "fun " ^ f ^ " (" ^ x ^ " : " ^ string_of_type t ^ "). " ^ string_of_expr e
+  | Let (x, e, e')    -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
+  | App (e1, e2)      ->
       let aux = function
-        | I i -> string_of_int i
-        | V v -> v
-        | e   -> "(" ^ string_of_expr e ^ ")"
+        | I i            -> string_of_int i
+        | V v            -> v
+        | Annoted _ as e -> string_of_expr e
+        | e              -> "(" ^ string_of_expr e ^ ")"
       in
       aux e1 ^ " " ^ aux e2
+  | Annoted (e, t)    -> "(" ^ string_of_expr e ^ " : " ^ string_of_type t ^ ")"
 
 let rec occurs (x : identifier) : typ -> bool = function
   | Arrow (t1, t2)        -> occurs x t1 || occurs x t2
@@ -49,8 +57,6 @@ let rec occurs (x : identifier) : typ -> bool = function
   | _                     -> false
 
 let rec find : typ -> typ = function
-  | Int                            -> Int
-  | GV gv                          -> GV gv
   | Arrow (t1, t2)                 -> Arrow (find t1, find t2)
   | TV ({contents= Bound t} as tv) ->
       let t' = find t in
@@ -131,31 +137,68 @@ let instantiate (t : typ) : typ =
 let rec infer (gamma : env) (expr : expr) (cs : (typ * typ) list) :
     env * typ * (typ * typ) list =
   match expr with
-  | I _            -> (gamma, Int, cs)
-  | V v            -> (gamma, instantiate (type_of_var gamma v), cs)
-  | Lam (x, e)     ->
-      let tx = freshTV () in
+  | I _                -> (gamma, Int, cs)
+  | V v                -> (gamma, instantiate (type_of_var gamma v), cs)
+  | Lam (x, e)         -> infer gamma (TLam (x, freshTV (), e)) cs
+  | TLam (x, tx, e)    ->
       let _, te, cse = infer ((x, tx) :: gamma) e cs in
       (gamma, Arrow (tx, te), cse)
-  | Fun (f, x, e)  ->
-      let tx = freshTV () and tfx = freshTV () in
+  | Fun (f, x, e)      -> infer gamma (TFun (f, x, freshTV (), e)) cs
+  | TFun (f, x, tx, e) ->
+      let tfx = freshTV () in
       let tf = Arrow (tx, tfx) in
       let _, te, cse = infer ((f, tf) :: (x, tx) :: gamma) e cs in
       (gamma, Arrow (tx, te), (tf, Arrow (tx, te)) :: cse)
-  | Let (x, e, e') ->
+  | Let (x, e, e')     ->
       let _, te, cse = infer gamma e cs in
       infer ((x, generalize gamma (unify_types te cse)) :: gamma) e' []
-  | App (e1, e2)   ->
+  | App (e1, e2)       ->
       let _, t1, cs1 = infer gamma e1 cs in
       let _, t2, cs2 = infer gamma e2 cs1 in
       let t = freshTV () in
       (gamma, t, (t1, Arrow (t2, t)) :: cs2)
+  | Annoted (e, t)     ->
+      let gamma', t', cs' = infer gamma e cs in
+      (gamma', t, (t', t) :: cs')
+
+let rec inferM (gamma : env) (t : typ) : expr -> env = function
+  | I _               ->
+      union (t, Int) ;
+      gamma
+  | V v               ->
+      union (t, instantiate (type_of_var gamma v)) ;
+      gamma
+  | Lam (x, e)        -> inferM gamma t (TLam (x, freshTV (), e))
+  | TLam (x, tx, e)   ->
+      let te = freshTV () in
+      union (t, Arrow (tx, te)) ;
+      let _ = inferM ((x, tx) :: gamma) te e in
+      gamma
+  | Fun (f, x, e)     ->
+      let _ = inferM ((f, t) :: gamma) t (Lam (x, e)) in
+      gamma
+  | TFun (f, x, t, e) ->
+      let _ = inferM ((f, t) :: gamma) t (Lam (x, e)) in
+      gamma
+  | Let (x, e, e')    ->
+      let te = freshTV () in
+      let _ = inferM gamma te e in
+      inferM ((x, generalize gamma (find te)) :: gamma) t e'
+  | App (e1, e2)      ->
+      let t2 = freshTV () in
+      let _ = inferM gamma (Arrow (t2, t)) e1 in
+      inferM gamma t2 e2
+  | Annoted (e, t')   ->
+      let _ = inferM gamma t' e in
+      union (t, t') ;
+      gamma
 
 let infer_type (expr : expr) =
   try
     refreshTV () ;
-    let gamma, t, cs = infer [] expr [] in
-    (gamma, unify_types t cs)
+    let t = TV (ref (Free "_")) in
+    let gamma = inferM [] t expr in
+    (gamma, find t)
   with IllTyped e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
     ([], Bad)
