@@ -2,8 +2,9 @@
 
 let print_inferred_type (expr : expr) : unit =
   let strexpr = "Type of " ^ string_of_expr expr ^ " is "
-  and gamma, t = infer_type expr in
-  if gamma = [] then print_string (strexpr ^ string_of_type t ^ "\n")
+  and gamma, t, e = infer_type expr in
+  if gamma = [] then
+    print_string (strexpr ^ string_of_type t ^ "/" ^ string_of_effect e ^ "\n")
   else (
     print_string (strexpr ^ string_of_type t ^ " with env:") ;
     List.iter
@@ -19,7 +20,7 @@ let print_examples (name : string) (es : expr list) =
 (* Infix alternative constructors *)
 let ( @: ) e1 e2 = App (e1, e2)
 
-let ( ->: ) t1 t2 = Arrow (t1, t2)
+let ( ->: ) t1 t2 eff = Arrow (t1, t2, eff)
 
 let _ =
   print_examples "Simple effects"
