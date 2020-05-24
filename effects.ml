@@ -2,9 +2,17 @@ type identifier = string
 
 type var = identifier
 
+type instance = identifier
+
 type typ = Int | Arrow of typ * typ | TV of tvar ref | GV of identifier | Bad
 
 and tvar = Free of identifier | Bound of typ
+
+type signature = Error | State of typ
+
+type effect = Pure | Effect of signature
+
+type type_effect = typ * effect
 
 type expr =
   | I of int
@@ -12,8 +20,14 @@ type expr =
   | Lam of var * expr
   | Let of var * expr * expr
   | App of expr * expr
+  | ILam of instance * signature * expr
+  | Op of instance * op
+
+and op = Throw | Get | Put
 
 type env = (var * typ) list
+
+type ienv = (instance * signature) list
 
 exception IllTyped of string
 
@@ -28,6 +42,19 @@ let rec string_of_type : typ -> string = function
   | GV v -> "'" ^ v
   | Bad -> "ILL-TYPED"
 
+let string_of_signature : signature -> string = function
+  | Error -> "Error"
+  | State t -> "State " ^ string_of_type t
+
+let string_of_effect : effect -> string = function
+  | Pure -> "i"
+  | Effect s -> string_of_signature s
+
+let string_of_op : op -> string = function
+  | Throw -> "raise"
+  | Put -> "put"
+  | Get -> "get"
+
 let rec string_of_expr : expr -> string = function
   | I i -> string_of_int i
   | V v -> v
@@ -38,9 +65,13 @@ let rec string_of_expr : expr -> string = function
       let aux = function
         | I i -> string_of_int i
         | V v -> v
+        | Op _ as e -> string_of_expr e
         | e -> "(" ^ string_of_expr e ^ ")"
       in
       aux e1 ^ " " ^ aux e2
+  | Op (a, op) -> string_of_op op ^ "_" ^ a
+  | ILam (a, s, e) ->
+      "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
 
 let rec occurs (x : identifier) : typ -> bool = function
   | Arrow (t1, t2) -> occurs x t1 || occurs x t2
@@ -148,34 +179,13 @@ let rec infer (gamma : env) (expr : expr) (cs : (typ * typ) list) :
       let _, t2, cs2 = infer gamma e2 cs1 in
       let t = freshTV () in
       (gamma, t, (t1, Arrow (t2, t)) :: cs2)
-
-let rec inferM (gamma : env) (t : typ) : expr -> env = function
-  | I _ ->
-      union (t, Int) ;
-      gamma
-  | V v ->
-      union (t, instantiate (type_of_var gamma v)) ;
-      gamma
-  | Lam (x, e) ->
-      let tx = freshTV () and te = freshTV () in
-      union (t, Arrow (tx, te)) ;
-      let _ = inferM ((x, tx) :: gamma) te e in
-      gamma
-  | Let (x, e, e') ->
-      let te = freshTV () in
-      let _ = inferM gamma te e in
-      inferM ((x, generalize gamma (find te)) :: gamma) t e'
-  | App (e1, e2) ->
-      let t2 = freshTV () in
-      let _ = inferM gamma (Arrow (t2, t)) e1 in
-      inferM gamma t2 e2
+  | Op _ | ILam _ -> raise (IllTyped "not implemented")
 
 let infer_type (expr : expr) =
   try
     refreshTV () ;
-    let t = TV (ref (Free "_")) in
-    let gamma = inferM [] t expr in
-    (gamma, find t)
+    let gamma, t, cs = infer [] expr [] in
+    (gamma, unify_types t cs)
   with IllTyped e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
     ([], Bad)
