@@ -5,6 +5,7 @@ type var = identifier
 type instance = identifier
 
 type typ =
+  | Unit
   | Int
   | Arrow of typ * typ * effect
   | TV of tvar ref
@@ -20,6 +21,7 @@ and effect = Pure | Effect of signature
 type type_effect = typ * effect
 
 type expr =
+  | Nil
   | I of int
   | V of var
   | Lam of var * expr
@@ -37,6 +39,7 @@ type ienv = (instance * signature) list
 exception IllTyped of string
 
 let rec string_of_type : typ -> string = function
+| Unit -> "Unit"
   | Int -> "Int"
   | Arrow (t1, t2, eff) ->
       ( match t1 with
@@ -62,6 +65,7 @@ let string_of_op : op -> string = function
   | Get -> "get"
 
 let rec string_of_expr : expr -> string = function
+  | Nil -> "()"
   | I i -> string_of_int i
   | V v -> v
   | Lam (x, e) -> "λ" ^ x ^ ". " ^ string_of_expr e
@@ -78,6 +82,11 @@ let rec string_of_expr : expr -> string = function
   | Op (a, op) -> string_of_op op ^ "_" ^ a
   | ILam (a, s, e) ->
       "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
+
+let signature_of_instance (chi : ienv) (a : instance) : signature =
+  match List.assoc_opt a chi with
+  | None -> raise (IllTyped ("Free instance " ^ a))
+  | Some s -> s
 
 let rec occurs (x : identifier) : typ -> bool = function
   | Arrow (t1, t2, _) -> occurs x t1 || occurs x t2
@@ -168,21 +177,22 @@ let instantiate (t : typ) : typ =
   in
   fst (instantiate' t [])
 
-let rec infer (gamma : env) (expr : expr) (cs : (typ * typ) list) :
-    env * type_effect * (typ * typ) list =
+let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
+    : env * type_effect * (typ * typ) list =
   match expr with
+  | Nil -> (gamma, (Unit, Pure), cs)
   | I _ -> (gamma, (Int, Pure), cs)
   | V v -> (gamma, (instantiate (type_of_var gamma v), Pure), cs)
   | Lam (x, e) ->
       let tx = freshTV () in
-      let _, (te, eff), cse = infer ((x, tx) :: gamma) e cs in
+      let _, (te, eff), cse = infer ((x, tx) :: gamma) chi e cs in
       (gamma, (Arrow (tx, te, eff), Pure), cse)
   | Let (x, e, e') ->
-      let _, (te, _), cse = infer gamma e cs in
-      infer ((x, generalize gamma (unify_types te cse)) :: gamma) e' []
+      let _, (te, _), cse = infer gamma chi e cs in
+      infer ((x, generalize gamma (unify_types te cse)) :: gamma) chi e' []
   | App (e1, e2) -> (
-      let _, (t1, ef1), cs1 = infer gamma e1 cs in
-      let _, (t2, ef2), cs2 = infer gamma e2 cs1 in
+      let _, (t1, ef1), cs1 = infer gamma chi e1 cs in
+      let _, (t2, ef2), cs2 = infer gamma chi e2 cs1 in
       let t = freshTV () in
       match unify_types t1 ((t1, Arrow (t2, t, Pure)) :: cs2) with
       | Arrow (t1', t1'', eff) -> (gamma, (t, eff), [])
@@ -194,22 +204,22 @@ let rec infer (gamma : env) (expr : expr) (cs : (typ * typ) list) :
                )) )
   | Op (a, op) ->
       ( gamma
-      , ( match op with
-        | Throw -> (Arrow (freshTV (), freshTV (), Effect Error), Pure)
-        | Put ->
-            let t = freshTV () in
-            (Arrow (t, Int, Effect (State t)), Pure)
-        | Get ->
-            let t = freshTV () in
-            (Arrow (Int, t, Effect (State t)), Pure) )
+      , ( match (op, signature_of_instance chi a) with
+        | Throw, Error -> (Arrow (freshTV (), freshTV (), Effect Error), Pure)
+        | Put, State t -> (Arrow (t, Unit, Effect (State t)), Pure)
+        | Get, State t -> (Arrow (Unit, t, Effect (State t)), Pure)
+        | _, s ->
+            raise
+              (IllTyped
+                 ( "Instance " ^ a ^ ":" ^ string_of_signature s
+                 ^ " used with operator " ^ string_of_op op )) )
       , cs )
-  | ILam (a, s, e) -> (* to be implemented later *)
-                      infer gamma e cs
+  | ILam (a, s, e) -> infer gamma ((a, s) :: chi) e cs
 
 let infer_type (expr : expr) : env * typ * effect =
   try
     refreshTV () ;
-    let gamma, (t, e), cs = infer [] expr [] in
+    let gamma, (t, e), cs = infer [] [] expr [] in
     (gamma, unify_types t cs, e)
   with IllTyped e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;

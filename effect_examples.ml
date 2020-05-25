@@ -24,5 +24,5 @@ let ( ->: ) t1 t2 eff = Arrow (t1, t2, eff)
 
 let _ =
   print_examples "Simple effects"
-    [ ILam ("a", State Int, Lam ("x", Op ("a", Put) @: V "x"))
-    ; Op ("e", Throw) @: I 1 ]
+    [ ILam ("a", State Int, Lam ("x", Op ("a", Put) @: V "x") @: I 21)
+    ; ILam ("e", Error, Op ("e", Throw) @: I 37) ]
