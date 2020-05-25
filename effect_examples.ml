@@ -4,7 +4,7 @@ let print_inferred_type (expr : expr) : unit =
   let strexpr = "Type of " ^ string_of_expr expr ^ " is "
   and gamma, t, e = infer_type expr in
   if gamma = [] then
-    print_string (strexpr ^ string_of_type t ^ "/" ^ string_of_effect e ^ "\n")
+    print_string (strexpr ^ string_of_type t ^ " / " ^ string_of_effect e ^ "\n")
   else (
     print_string (strexpr ^ string_of_type t ^ " with env:") ;
     List.iter
@@ -28,7 +28,7 @@ let _ =
     ; Handle
         ( "a"
         , State Int
-        , Op ("a", Throw) @: I 37
+        , Op ("a", Put) @: I 37
         , ( [(Put, "v", "k", V "k" @: Nil); (Get, "()", "k", V "k" @: I 42)]
           , "x"
           , V "x" ) ) ]

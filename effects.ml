@@ -10,13 +10,14 @@ type typ =
   | Arrow of typ * typ * effect
   | TV of tvar ref
   | GV of identifier
+  | Forall of instance * signature * typ
   | Bad
 
 and tvar = Free of identifier | Bound of typ
 
 and signature = Error | State of typ
 
-and effect = Pure | Effect of signature
+and effect = Pure | Effect of instance * signature
 
 type type_effect = typ * effect
 
@@ -52,6 +53,7 @@ let rec string_of_type : typ -> string = function
   | TV {contents= Free a} -> a
   | TV {contents= Bound t} -> string_of_type t
   | GV v -> "'" ^ v
+  | Forall(a,s,t) -> "∀" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_type t 
   | Bad -> "ILL-TYPED"
 
 and string_of_signature : signature -> string = function
@@ -60,7 +62,7 @@ and string_of_signature : signature -> string = function
 
 and string_of_effect : effect -> string = function
   | Pure -> "i"
-  | Effect s -> string_of_signature s
+  | Effect (a, s) ->  a ^ ":" ^ string_of_signature s
 
 let string_of_op : op -> string = function
   | Throw -> "throw"
@@ -222,16 +224,18 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
   | Op (a, op) ->
       ( gamma
       , ( match (op, signature_of_instance chi a) with
-        | Throw, Error -> (Arrow (freshTV (), freshTV (), Effect Error), Pure)
-        | Put, State t -> (Arrow (t, Unit, Effect (State t)), Pure)
-        | Get, State t -> (Arrow (Unit, t, Effect (State t)), Pure)
+        | Throw, Error -> (Arrow (freshTV (), freshTV (), Effect (a, Error)), Pure)
+        | Put, State t -> (Arrow (t, Unit, Effect (a,(State t))), Pure)
+        | Get, State t -> (Arrow (Unit, t, Effect (a,(State t))), Pure)
         | _, s ->
             raise
               (IllTyped
                  ( "Instance " ^ a ^ ":" ^ string_of_signature s
                  ^ " used with operator " ^ string_of_op op )) )
       , cs )
-  | ILam (a, s, e) -> infer gamma ((a, s) :: chi) e cs
+  | ILam (a, s, e) -> 
+  let gamma', (t', e'), cs' = infer gamma ((a, s) :: chi) e cs in
+  gamma', (Forall(a,s,t'), e') , cs'
   | Handle (a, s, e, h) -> (* placeholder *)
                            infer gamma ((a, s) :: chi) e cs
 
