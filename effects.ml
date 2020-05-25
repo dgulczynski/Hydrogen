@@ -29,8 +29,11 @@ type expr =
   | App of expr * expr
   | ILam of instance * signature * expr
   | Op of instance * op
+  | Handle of instance * signature * expr * handler
 
 and op = Throw | Get | Put
+
+and handler = (op * var * var * expr) list * var * expr
 
 type env = (var * typ) list
 
@@ -39,7 +42,7 @@ type ienv = (instance * signature) list
 exception IllTyped of string
 
 let rec string_of_type : typ -> string = function
-| Unit -> "Unit"
+  | Unit -> "Unit"
   | Int -> "Int"
   | Arrow (t1, t2, eff) ->
       ( match t1 with
@@ -60,7 +63,7 @@ and string_of_effect : effect -> string = function
   | Effect s -> string_of_signature s
 
 let string_of_op : op -> string = function
-  | Throw -> "raise"
+  | Throw -> "throw"
   | Put -> "put"
   | Get -> "get"
 
@@ -73,6 +76,7 @@ let rec string_of_expr : expr -> string = function
       "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
   | App (e1, e2) ->
       let aux = function
+        | Nil -> "()"
         | I i -> string_of_int i
         | V v -> v
         | Op _ as e -> string_of_expr e
@@ -82,6 +86,19 @@ let rec string_of_expr : expr -> string = function
   | Op (a, op) -> string_of_op op ^ "_" ^ a
   | ILam (a, s, e) ->
       "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
+  | Handle (a, s, e, h) ->
+      "handle_" ^ a ^ ":" ^ string_of_signature s ^ " " ^ string_of_expr e
+      ^ " " ^ string_of_handler h
+
+and string_of_handler : handler -> string = function
+  | hs, x, ret ->
+      "{"
+      ^ List.fold_right
+          (fun (op, x, k, e) acc ->
+            string_of_op op ^ " " ^ x ^ " " ^ k ^ ". " ^ string_of_expr e
+            ^ " | " ^ acc )
+          hs ""
+      ^ "return " ^ x ^ ". " ^ string_of_expr ret ^ "}"
 
 let signature_of_instance (chi : ienv) (a : instance) : signature =
   match List.assoc_opt a chi with
@@ -215,6 +232,8 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
                  ^ " used with operator " ^ string_of_op op )) )
       , cs )
   | ILam (a, s, e) -> infer gamma ((a, s) :: chi) e cs
+  | Handle (a, s, e, h) -> (* placeholder *)
+                           infer gamma ((a, s) :: chi) e cs
 
 let infer_type (expr : expr) : env * typ * effect =
   try
