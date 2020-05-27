@@ -17,7 +17,7 @@ and tvar = Free of identifier | Bound of typ
 
 and signature = Error | State of typ
 
-and effect = Pure | Effect of instance * signature
+and effect = Pure | Effect of (instance * signature) list
 
 type type_effect = typ * effect
 
@@ -47,13 +47,15 @@ let rec string_of_type : typ -> string = function
   | Int -> "Int"
   | Arrow (t1, t2, eff) ->
       ( match t1 with
-      | Arrow _ -> "(" ^ string_of_type t1 ^ ") -"
-      | _ -> string_of_type t1 ^ " -" )
-      ^ string_of_effect eff ^ "-> " ^ string_of_type t2
+      | Arrow _ -> "(" ^ string_of_type t1 ^ ") "
+      | _ -> string_of_type t1 ^ " " )
+      ^ (if eff = Pure then "" else "-" ^ string_of_effect eff)
+      ^ "-> " ^ string_of_type t2
   | TV {contents= Free a} -> a
   | TV {contents= Bound t} -> string_of_type t
   | GV v -> "'" ^ v
-  | Forall(a,s,t) -> "∀" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_type t 
+  | Forall (a, s, t) ->
+      "∀" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_type t
   | Bad -> "ILL-TYPED"
 
 and string_of_signature : signature -> string = function
@@ -61,8 +63,13 @@ and string_of_signature : signature -> string = function
   | State t -> "State(" ^ string_of_type t ^ ")"
 
 and string_of_effect : effect -> string = function
-  | Pure -> "i"
-  | Effect (a, s) ->  a ^ ":" ^ string_of_signature s
+  | Pure | Effect [] -> "i"
+  | Effect ((a, s) :: es) ->
+      "{"
+      ^ List.fold_right
+          (fun (a, s) acc -> a ^ ":" ^ string_of_signature s ^ " " ^ acc)
+          es
+          (a ^ ":" ^ string_of_signature s ^ "}")
 
 let string_of_op : op -> string = function
   | Throw -> "throw"
@@ -106,6 +113,11 @@ let signature_of_instance (chi : ienv) (a : instance) : signature =
   match List.assoc_opt a chi with
   | None -> raise (IllTyped ("Free instance " ^ a))
   | Some s -> s
+
+let combine (e1 : effect) (e2 : effect) : effect =
+  match (e1, e2) with
+  | Pure, e | e, Pure -> e
+  | Effect es1, Effect es2 -> Effect (List.merge compare es1 es2)
 
 let rec occurs (x : identifier) : typ -> bool = function
   | Arrow (t1, t2, _) -> occurs x t1 || occurs x t2
@@ -214,7 +226,8 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
       let _, (t2, ef2), cs2 = infer gamma chi e2 cs1 in
       let t = freshTV () in
       match unify_types t1 ((t1, Arrow (t2, t, Pure)) :: cs2) with
-      | Arrow (t1', t1'', eff) -> (gamma, (t, eff), [])
+      | Arrow (t1', t1'', eff) ->
+          (gamma, (t, combine eff (combine ef1 ef2)), [])
       | _ ->
           raise
             (IllTyped
@@ -224,20 +237,25 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
   | Op (a, op) ->
       ( gamma
       , ( match (op, signature_of_instance chi a) with
-        | Throw, Error -> (Arrow (freshTV (), freshTV (), Effect (a, Error)), Pure)
-        | Put, State t -> (Arrow (t, Unit, Effect (a,(State t))), Pure)
-        | Get, State t -> (Arrow (Unit, t, Effect (a,(State t))), Pure)
+        | Throw, Error ->
+            (Arrow (freshTV (), freshTV (), Effect [(a, Error)]), Pure)
+        | Put, State t -> (Arrow (t, Unit, Effect [(a, State t)]), Pure)
+        | Get, State t -> (Arrow (Unit, t, Effect [(a, State t)]), Pure)
         | _, s ->
             raise
               (IllTyped
                  ( "Instance " ^ a ^ ":" ^ string_of_signature s
                  ^ " used with operator " ^ string_of_op op )) )
       , cs )
-  | ILam (a, s, e) -> 
-  let gamma', (t', e'), cs' = infer gamma ((a, s) :: chi) e cs in
-  gamma', (Forall(a,s,t'), e') , cs'
-  | Handle (a, s, e, h) -> (* placeholder *)
-                           infer gamma ((a, s) :: chi) e cs
+  | ILam (a, s, e) ->
+      let gamma', (t', e'), cs' = infer gamma ((a, s) :: chi) e cs in
+      (gamma', (Forall (a, s, t'), e'), cs')
+  | Handle (a, s, e, (_, x, ret)) ->
+      let _, (e_t, e_eff), e_cs = infer gamma ((a, s) :: chi) e cs in
+      let _, (ret_t, ret_eff), ret_cs =
+        infer ((x, e_t) :: gamma) chi ret e_cs
+      in
+      (gamma, (ret_t, combine e_eff ret_eff), ret_cs)
 
 let infer_type (expr : expr) : env * typ * effect =
   try
