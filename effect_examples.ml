@@ -4,10 +4,9 @@ let print_inferred_type (expr : expr) : unit =
   let strexpr = "Type / effect of " ^ string_of_expr expr ^ " is "
   and gamma, t, e = infer_type expr in
   if gamma = [] then
-    print_string
-      (strexpr ^ string_of_type t ^ " / " ^ string_of_effect e ^ "\n")
+    print_string (strexpr ^ string_of_type_effect (t, e) ^ "\n")
   else (
-    print_string (strexpr ^ string_of_type t ^ " with env:") ;
+    print_string (strexpr ^ string_of_type_effect (t, e) ^ " with env:") ;
     List.iter
       (fun (x, t) -> print_string (" (" ^ x ^ " : " ^ string_of_type t ^ ")"))
       gamma ;
@@ -25,7 +24,7 @@ let ( ->: ) t1 t2 eff = Arrow (t1, t2, eff)
 
 let _ =
   print_examples "Simple effects"
-    [ ILam ("e", Error, Lam("x", Op ("e", Throw) @: V "x"))
+    [ ILam ("e", Error, Lam ("x", Op ("e", Raise) @: V "x"))
     ; Handle
         ( "a"
         , State Int
@@ -47,4 +46,15 @@ let _ =
                 , Op ("a", Put) @: (Op ("b", Get) @: Nil) @: V "y"
                 , ([(Get, "()", "k", V "k" @: Lam ("x", V "x"))], "x", V "x")
                 )
+            , ([(Put, "v", "k", V "k" @: Nil)], "x", V "x") ) ) ]
+
+let _ =
+  print_examples "Instance application"
+    [ Let
+        ( "putx"
+        , ILam ("s", State Int, Lam ("x", Op ("s", Put) @: V "x"))
+        , Handle
+            ( "a"
+            , State Int
+            , IApp (V "putx", "a") @: I 1
             , ([(Put, "v", "k", V "k" @: Nil)], "x", V "x") ) ) ]

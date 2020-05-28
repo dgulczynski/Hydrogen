@@ -28,11 +28,12 @@ type expr =
   | Lam of var * expr
   | Let of var * expr * expr
   | App of expr * expr
-  | ILam of instance * signature * expr
   | Op of instance * op
   | Handle of instance * signature * expr * handler
+  | ILam of instance * signature * expr
+  | IApp of expr * instance
 
-and op = Throw | Get | Put
+and op = Raise | Get | Put
 
 and handler = (op * var * var * expr) list * var * expr
 
@@ -72,7 +73,7 @@ and string_of_effect : effect -> string = function
           (a ^ ":" ^ string_of_signature s ^ "}")
 
 let string_of_op : op -> string = function
-  | Throw -> "throw"
+  | Raise -> "raise"
   | Put -> "put"
   | Get -> "get"
 
@@ -93,11 +94,12 @@ let rec string_of_expr : expr -> string = function
       in
       aux e1 ^ " " ^ aux e2
   | Op (a, op) -> string_of_op op ^ "_" ^ a
-  | ILam (a, s, e) ->
-      "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
   | Handle (a, s, e, h) ->
       "handle_" ^ a ^ ":" ^ string_of_signature s ^ " " ^ string_of_expr e
       ^ " " ^ string_of_handler h
+  | ILam (a, s, e) ->
+      "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
+  | IApp (e, a) -> "(" ^ string_of_expr e ^ ")<" ^ a ^ ">"
 
 and string_of_handler : handler -> string = function
   | hs, x, ret ->
@@ -108,6 +110,9 @@ and string_of_handler : handler -> string = function
             ^ " | " ^ acc )
           hs ""
       ^ "return " ^ x ^ ". " ^ string_of_expr ret ^ "}"
+
+let string_of_type_effect : type_effect -> string = function
+  | t, e -> string_of_type t ^ " / " ^ string_of_effect e
 
 let signature_of_instance (chi : ienv) (a : instance) : signature =
   match List.assoc_opt a chi with
@@ -208,6 +213,19 @@ let instantiate (t : typ) : typ =
   in
   fst (instantiate' t [])
 
+let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
+  let rec aux_eff = function
+    | Effect es ->
+        Effect
+          (List.map (fun (a', s') -> if a' = a then (b, s') else (a', s')) es)
+    | e -> e
+  and aux_type = function
+    | Forall (a', s', t') when a' != a -> Forall (a', s', aux_type t')
+    | Arrow (t1, t2, eff) -> Arrow (t1, t2, aux_eff eff)
+    | t -> t
+  in
+  function t, e -> (aux_type (find t), aux_eff e)
+
 let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
     : env * type_effect * (typ * typ) list =
   match expr with
@@ -219,8 +237,10 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
       let _, (te, eff), cse = infer ((x, tx) :: gamma) chi e cs in
       (gamma, (Arrow (tx, te, eff), Pure), cse)
   | Let (x, e, e') ->
-      let _, (te, _), cse = infer gamma chi e cs in
-      infer ((x, generalize gamma (unify_types te cse)) :: gamma) chi e' []
+      let _, (te, eff), cse = infer gamma chi e cs in
+      if eff = Pure then
+        infer ((x, generalize gamma (unify_types te cse)) :: gamma) chi e' []
+      else infer ((x, unify_types te cse) :: gamma) chi e' []
   | App (e1, e2) -> (
       let _, (t1, ef1), cs1 = infer gamma chi e1 cs in
       let _, (t2, ef2), cs2 = infer gamma chi e2 cs1 in
@@ -237,7 +257,7 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
   | Op (a, op) ->
       ( gamma
       , ( match (op, signature_of_instance chi a) with
-        | Throw, Error ->
+        | Raise, Error ->
             (Arrow (freshTV (), freshTV (), Effect [(a, Error)]), Pure)
         | Put, State t -> (Arrow (t, Unit, Effect [(a, State t)]), Pure)
         | Get, State t -> (Arrow (Unit, t, Effect [(a, State t)]), Pure)
@@ -247,15 +267,26 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
                  ( "Instance " ^ a ^ ":" ^ string_of_signature s
                  ^ " used with operator " ^ string_of_op op )) )
       , cs )
-  | ILam (a, s, e) ->
-      let gamma', (t', e'), cs' = infer gamma ((a, s) :: chi) e cs in
-      (gamma', (Forall (a, s, t'), e'), cs')
   | Handle (a, s, e, (_, x, ret)) ->
       let _, (e_t, e_eff), e_cs = infer gamma ((a, s) :: chi) e cs in
       let _, (ret_t, ret_eff), ret_cs =
         infer ((x, e_t) :: gamma) chi ret e_cs
       in
       (gamma, (ret_t, combine e_eff ret_eff), ret_cs)
+  | ILam (a, s, e) ->
+      let gamma', (t', eff'), cs' = infer gamma ((a, s) :: chi) e cs in
+      (gamma', (Forall (a, s, t'), eff'), cs')
+  | IApp (e, a) -> (
+      let _, (t', eff'), cs' = infer gamma chi e cs in
+      match (find t', signature_of_instance chi a) with
+      | Forall (a', s', t'), s when s = s' ->
+          (gamma, subst_instance a' a (t', eff'), cs')
+      | t', s ->
+          raise
+            (IllTyped
+               ( "Instance " ^ a ^ ":" ^ string_of_signature s
+               ^ " application to "
+               ^ string_of_type_effect (t', eff') )) )
 
 let infer_type (expr : expr) : env * typ * effect =
   try
