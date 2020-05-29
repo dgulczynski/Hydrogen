@@ -39,7 +39,7 @@ and handler = (op * var * var * expr) list * var * expr
 
 type env = (var * typ) list
 
-type ienv = (instance * signature) list
+type ienv = (instance * (signature * (op * typ) list)) list
 
 exception IllTyped of string
 
@@ -117,12 +117,32 @@ let string_of_type_effect : type_effect -> string = function
 let signature_of_instance (chi : ienv) (a : instance) : signature =
   match List.assoc_opt a chi with
   | None -> raise (IllTyped ("Free instance " ^ a))
-  | Some s -> s
+  | Some (s, _) -> s
+
+let type_of_op (chi : ienv) (a : instance) (op : op) : type_effect =
+  match List.assoc_opt a chi with
+  | None -> raise (IllTyped ("Free instance " ^ a))
+  | Some (s, ops) -> (
+    match List.assoc_opt op ops with
+    | Some t -> (t, Pure)
+    | None ->
+        raise
+          (IllTyped
+             ( "Instance " ^ a ^ ":" ^ string_of_signature s
+             ^ " doesn't define operator " ^ string_of_op op )) )
 
 let combine (e1 : effect) (e2 : effect) : effect =
+  let rec aux es1 es2 =
+    match (es1, es2) with
+    | [], es | es, [] -> es
+    | e1 :: es1, e2 :: es2 ->
+        if e1 < e2 then e1 :: aux es1 (e2 :: es2)
+        else if e1 > e2 then e2 :: aux (e1 :: es1) es2
+        else e1 :: aux es1 es2
+  in
   match (e1, e2) with
   | Pure, e | e, Pure -> e
-  | Effect es1, Effect es2 -> Effect (List.merge compare es1 es2)
+  | Effect es1, Effect es2 -> Effect (aux es1 es2)
 
 let rec occurs (x : identifier) : typ -> bool = function
   | Arrow (t1, t2, _) -> occurs x t1 || occurs x t2
@@ -254,28 +274,37 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
                ( string_of_expr e1 ^ " should have type " ^ string_of_type t2
                ^ " -> " ^ string_of_type t ^ "instead of " ^ string_of_type t1
                )) )
-  | Op (a, op) ->
-      ( gamma
-      , ( match (op, signature_of_instance chi a) with
-        | Raise, Error ->
-            (Arrow (freshTV (), freshTV (), Effect [(a, Error)]), Pure)
-        | Put, State t -> (Arrow (t, Unit, Effect [(a, State t)]), Pure)
-        | Get, State t -> (Arrow (Unit, t, Effect [(a, State t)]), Pure)
-        | _, s ->
-            raise
-              (IllTyped
-                 ( "Instance " ^ a ^ ":" ^ string_of_signature s
-                 ^ " used with operator " ^ string_of_op op )) )
-      , cs )
-  | Handle (a, s, e, (_, x, ret)) ->
-      let _, (e_t, e_eff), e_cs = infer gamma ((a, s) :: chi) e cs in
+  | Op (a, op) -> (gamma, type_of_op chi a op, cs)
+  | Handle (a, s, e, (hs, x, ret)) ->
+      let t = freshTV () in
+      let infer_handler (op, x, r, e) (hts, hcs) =
+        let t1, t2 =
+          match (op, s) with
+          | Put, State t' -> (t', Unit)
+          | Get, State t' -> (Unit, t')
+          | _ -> (freshTV (), freshTV ())
+        in
+        let _, (th, eh), csh =
+          infer ((x, t1) :: (r, Arrow (t2, t, Pure)) :: gamma) chi e hcs
+        in
+        ( (op, Arrow (t1, t2, combine eh (Effect [(a, s)]))) :: hts
+        , (th, t) :: csh )
+      in
+      let ops, cs' = List.fold_right infer_handler hs ([], cs) in
+      let _, (e_t, e_eff), e_cs = infer gamma ((a, (s, ops)) :: chi) e cs' in
       let _, (ret_t, ret_eff), ret_cs =
         infer ((x, e_t) :: gamma) chi ret e_cs
       in
-      (gamma, (ret_t, combine e_eff ret_eff), ret_cs)
+      (gamma, (ret_t, combine e_eff ret_eff), (ret_t, t) :: ret_cs)
   | ILam (a, s, e) ->
-      let gamma', (t', eff'), cs' = infer gamma ((a, s) :: chi) e cs in
-      (gamma', (Forall (a, s, t'), eff'), cs')
+      let eff = Effect [(a, s)] in
+      let ops =
+        match s with
+        | Error -> [(Raise, Arrow (freshTV (), freshTV (), eff))]
+        | State t -> [(Put, Arrow (t, Unit, eff)); (Get, Arrow (Unit, t, eff))]
+      in
+      let _, (t', eff'), cs' = infer gamma ((a, (s, ops)) :: chi) e cs in
+      (gamma, (Forall (a, s, t'), eff'), cs')
   | IApp (e, a) -> (
       let _, (t', eff'), cs' = infer gamma chi e cs in
       match (find t', signature_of_instance chi a) with

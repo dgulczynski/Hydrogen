@@ -1,12 +1,11 @@
 #use "effects.ml"
 
 let print_inferred_type (expr : expr) : unit =
-  let strexpr = "Type / effect of " ^ string_of_expr expr ^ " is "
-  and gamma, t, e = infer_type expr in
-  if gamma = [] then
-    print_string (strexpr ^ string_of_type_effect (t, e) ^ "\n")
+  let gamma, t, e = infer_type expr in
+  print_string ("Type / effect of " ^ string_of_expr expr ^ " is ") ;
+  if gamma = [] then print_string (string_of_type_effect (t, e) ^ "\n")
   else (
-    print_string (strexpr ^ string_of_type_effect (t, e) ^ " with env:") ;
+    print_string (string_of_type_effect (t, e) ^ " with env:") ;
     List.iter
       (fun (x, t) -> print_string (" (" ^ x ^ " : " ^ string_of_type t ^ ")"))
       gamma ;
@@ -57,4 +56,6 @@ let _ =
             ( "a"
             , State Int
             , IApp (V "putx", "a") @: I 1
-            , ([(Put, "v", "k", V "k" @: Nil)], "x", V "x") ) ) ]
+            , ( [(Put, "v", "k", V "k" @: Nil); (Get, "()", "k", V "k" @: I 1)]
+              , "x"
+              , I 2 ) ) ) ]
