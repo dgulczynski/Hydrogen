@@ -14,8 +14,8 @@ Type inference playground.
 Simply running `ocaml effect_examples.ml` should result in output like:
 ```
 Simple effects:
-Type / effect of λe:Error. λx. raise_e x is ∀e:Error. c -{e:Error}-> d / i
-Type / effect of handle_a:State(Int) put_a 21 {put v k. k () | get () k. k 37 | return x. λy. x} is e -> Unit / {a:State(Int)}
+Type / effect of λe:Error. λx. raise_e x is ∀e:Error. b -{e:Error}-> a / i
+Type / effect of handle_a:State(Int) put_a 21 {put v k. k () | get () k. k 37 | return x. λy. x} is d -> Unit / {a:State(Int)}
 
 Nested effects:
 Type / effect of λy. handle_a:State(Int) handle_b:State(Int -> Int) put_a ((get_b ()) y) {get () k. k (λx. x) | return x. x} {put v k. k () | return x. x} is Int -{b:State(Int -> Int) a:State(Int)}-> Unit / i

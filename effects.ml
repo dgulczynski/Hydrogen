@@ -19,6 +19,8 @@ and signature = Error | State of typ
 
 and effect = Pure | Effect of (instance * signature) list
 
+type op_type = typ * typ * effect
+
 type type_effect = typ * effect
 
 type expr =
@@ -28,7 +30,7 @@ type expr =
   | Lam of var * expr
   | Let of var * expr * expr
   | App of expr * expr
-  | Op of instance * op
+  | Op of instance * op * expr
   | Handle of instance * signature * expr * handler
   | ILam of instance * signature * expr
   | IApp of expr * instance
@@ -39,7 +41,7 @@ and handler = (op * var * var * expr) list * var * expr
 
 type env = (var * typ) list
 
-type ienv = (instance * (signature * (op * typ) list)) list
+type ienv = (instance * (signature * (op * op_type) list)) list
 
 exception IllTyped of string
 
@@ -77,29 +79,26 @@ let string_of_op : op -> string = function
   | Put -> "put"
   | Get -> "get"
 
-let rec string_of_expr : expr -> string = function
-  | Nil -> "()"
-  | I i -> string_of_int i
-  | V v -> v
+let rec string_of_expr : expr -> string =
+  let aux = function
+    | Nil -> "()"
+    | I i -> string_of_int i
+    | V v -> v
+    | e -> "(" ^ string_of_expr e ^ ")"
+  in
+  function
   | Lam (x, e) -> "λ" ^ x ^ ". " ^ string_of_expr e
   | Let (x, e, e') ->
       "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
-  | App (e1, e2) ->
-      let aux = function
-        | Nil -> "()"
-        | I i -> string_of_int i
-        | V v -> v
-        | Op _ as e -> string_of_expr e
-        | e -> "(" ^ string_of_expr e ^ ")"
-      in
-      aux e1 ^ " " ^ aux e2
-  | Op (a, op) -> string_of_op op ^ "_" ^ a
+  | App (e1, e2) -> aux e1 ^ " " ^ aux e2
+  | Op (a, op, e) -> string_of_op op ^ "_" ^ a ^ " " ^ aux e
   | Handle (a, s, e, h) ->
       "handle_" ^ a ^ ":" ^ string_of_signature s ^ " " ^ string_of_expr e
       ^ " " ^ string_of_handler h
   | ILam (a, s, e) ->
       "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
   | IApp (e, a) -> "(" ^ string_of_expr e ^ ")<" ^ a ^ ">"
+  | e' -> aux e'
 
 and string_of_handler : handler -> string = function
   | hs, x, ret ->
@@ -108,8 +107,8 @@ and string_of_handler : handler -> string = function
           (fun (op, x, k, e) acc ->
             string_of_op op ^ " " ^ x ^ " " ^ k ^ ". " ^ string_of_expr e
             ^ " | " ^ acc )
-          hs ""
-      ^ "return " ^ x ^ ". " ^ string_of_expr ret ^ "}"
+          hs
+          ("return " ^ x ^ ". " ^ string_of_expr ret ^ "}")
 
 let string_of_type_effect : type_effect -> string = function
   | t, e -> string_of_type t ^ " / " ^ string_of_effect e
@@ -119,12 +118,12 @@ let signature_of_instance (chi : ienv) (a : instance) : signature =
   | None -> raise (IllTyped ("Free instance " ^ a))
   | Some (s, _) -> s
 
-let type_of_op (chi : ienv) (a : instance) (op : op) : type_effect =
+let type_of_op (chi : ienv) (a : instance) (op : op) : op_type =
   match List.assoc_opt a chi with
   | None -> raise (IllTyped ("Free instance " ^ a))
   | Some (s, ops) -> (
     match List.assoc_opt op ops with
-    | Some t -> (t, Pure)
+    | Some t -> t
     | None ->
         raise
           (IllTyped
@@ -274,7 +273,10 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
                ( string_of_expr e1 ^ " should have type " ^ string_of_type t2
                ^ " -> " ^ string_of_type t ^ "instead of " ^ string_of_type t1
                )) )
-  | Op (a, op) -> (gamma, type_of_op chi a op, cs)
+  | Op (a, op, e) ->
+      let t1, t2, op_eff = type_of_op chi a op in
+      let _, (e_t, e_eff), e_cs = infer gamma chi e cs in
+      (gamma, (t2, combine e_eff op_eff), (e_t, t1) :: e_cs)
   | Handle (a, s, e, (hs, x, ret)) ->
       let t = freshTV () in
       let infer_handler (op, x, r, e) (hts, hcs) =
@@ -284,11 +286,10 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
           | Get, State t' -> (Unit, t')
           | _ -> (freshTV (), freshTV ())
         in
-        let _, (th, eh), csh =
+        let _, (th, _), csh =
           infer ((x, t1) :: (r, Arrow (t2, t, Pure)) :: gamma) chi e hcs
         in
-        ( (op, Arrow (t1, t2, combine eh (Effect [(a, s)]))) :: hts
-        , (th, t) :: csh )
+        ((op, (t1, t2, Effect [(a, s)])) :: hts, (th, t) :: csh)
       in
       let ops, cs' = List.fold_right infer_handler hs ([], cs) in
       let _, (e_t, e_eff), e_cs = infer gamma ((a, (s, ops)) :: chi) e cs' in
@@ -300,8 +301,8 @@ let rec infer (gamma : env) (chi : ienv) (expr : expr) (cs : (typ * typ) list)
       let eff = Effect [(a, s)] in
       let ops =
         match s with
-        | Error -> [(Raise, Arrow (freshTV (), freshTV (), eff))]
-        | State t -> [(Put, Arrow (t, Unit, eff)); (Get, Arrow (Unit, t, eff))]
+        | Error -> [(Raise, (freshTV (), freshTV (), eff))]
+        | State t -> [(Put, (t, Unit, eff)); (Get, (Unit, t, eff))]
       in
       let _, (t', eff'), cs' = infer gamma ((a, (s, ops)) :: chi) e cs in
       (gamma, (Forall (a, s, t'), eff'), cs')
