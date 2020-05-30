@@ -1,3 +1,4 @@
+;;
 #use "effects.ml"
 
 let print_inferred_type (expr : expr) : unit =
@@ -6,9 +7,7 @@ let print_inferred_type (expr : expr) : unit =
   if gamma = [] then print_string (string_of_type_effect (t, e) ^ "\n")
   else (
     print_string (string_of_type_effect (t, e) ^ " with env:") ;
-    List.iter
-      (fun (x, t) -> print_string (" (" ^ x ^ " : " ^ string_of_type t ^ ")"))
-      gamma ;
+    List.iter (fun (x, t) -> print_string (" (" ^ x ^ " : " ^ string_of_type t ^ ")")) gamma ;
     print_newline () )
 
 let print_examples (name : string) (es : expr list) =
@@ -43,8 +42,7 @@ let _ =
                 ( "b"
                 , State ((Int ->: Int) Pure)
                 , Op ("a", Put, Op ("b", Get, Nil) @: V "y")
-                , ([(Get, "()", "k", V "k" @: Lam ("x", V "x"))], "x", V "x")
-                )
+                , ([(Get, "()", "k", V "k" @: Lam ("x", V "x"))], "x", V "x") )
             , ([(Put, "v", "k", V "k" @: Nil)], "x", V "x") ) ) ]
 
 let _ =
@@ -56,6 +54,5 @@ let _ =
             ( "a"
             , State Int
             , IApp (V "putx", "a") @: I 1
-            , ( [(Put, "v", "k", V "k" @: Nil); (Get, "()", "k", V "k" @: I 1)]
-              , "x"
-              , I 2 ) ) ) ]
+            , ([(Put, "v", "k", V "k" @: Nil); (Get, "()", "k", V "k" @: I 1)], "x", I 2) ) )
+    ]
