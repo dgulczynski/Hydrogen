@@ -27,9 +27,7 @@ let _ =
         ( "a"
         , State Int
         , Op ("a", Put, I 21)
-        , ( [(Put, "v", "k", V "k" @: Nil); (Get, "()", "k", V "k" @: I 37)]
-          , "x"
-          , Lam ("y", V "x") ) ) ]
+        , ([(Put, "v", "k", V "k" @: Nil); (Get, "()", "k", V "k" @: I 37)], "x", V "x") ) ]
 
 let _ =
   print_examples "Nested effects"
@@ -40,7 +38,7 @@ let _ =
             , State Int
             , Handle
                 ( "b"
-                , State ((Int ->: Int) Pure)
+                , State ((Int ->: Int) pure)
                 , Op ("a", Put, Op ("b", Get, Nil) @: V "y")
                 , ([(Get, "()", "k", V "k" @: Lam ("x", V "x"))], "x", V "x") )
             , ([(Put, "v", "k", V "k" @: Nil)], "x", V "x") ) ) ]

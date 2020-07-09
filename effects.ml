@@ -4,20 +4,20 @@ type var = identifier
 
 type instance = identifier
 
+type 'a univar = Free of identifier | Bound of 'a
+
 type typ =
   | Unit
   | Int
   | Arrow  of typ * typ * effect
-  | TV     of tvar ref
+  | TV     of typ univar ref
   | GV     of identifier
   | Forall of instance * signature * typ
   | Bad
 
-and tvar = Free of identifier | Bound of typ
+and signature = Error | State of typ | SV of signature univar ref
 
-and signature = Error | State of typ
-
-and effect = Pure | Effect of (instance * signature) list
+and effect = instance list
 
 type op_type = typ * typ * effect
 
@@ -39,11 +39,15 @@ and op = Raise | Get | Put
 
 and handler = (op * var * var * expr) list * var * expr
 
-type env = (var * typ) list
+type 'a environment = (identifier * 'a) list
 
-type ienv = (instance * (signature * (op * op_type) list)) list
+type env = typ environment
+
+type ienv = signature environment
 
 exception IllTyped of string
+
+let pure : effect = []
 
 let rec string_of_type : typ -> string = function
   | Unit                   -> "Unit"
@@ -52,7 +56,7 @@ let rec string_of_type : typ -> string = function
       ( match t1 with
       | Arrow _ -> "(" ^ string_of_type t1 ^ ") "
       | _       -> string_of_type t1 ^ " " )
-      ^ (if eff = Pure then "" else "-" ^ string_of_effect eff)
+      ^ (if eff = [] then "" else "-" ^ string_of_effect eff)
       ^ "-> " ^ string_of_type t2
   | TV {contents= Free a}  -> a
   | TV {contents= Bound t} -> string_of_type t
@@ -61,17 +65,14 @@ let rec string_of_type : typ -> string = function
   | Bad                    -> "ILL-TYPED"
 
 and string_of_signature : signature -> string = function
-  | Error   -> "Error"
-  | State t -> "State(" ^ string_of_type t ^ ")"
+  | Error                  -> "Error"
+  | State t                -> "State(" ^ string_of_type t ^ ")"
+  | SV {contents= Free a}  -> a
+  | SV {contents= Bound s} -> string_of_signature s
 
 and string_of_effect : effect -> string = function
-  | Pure | Effect []      -> "i"
-  | Effect ((a, s) :: es) ->
-      "{"
-      ^ List.fold_right
-          (fun (a, s) acc -> a ^ ":" ^ string_of_signature s ^ " " ^ acc)
-          es
-          (a ^ ":" ^ string_of_signature s ^ "}")
+  | []      -> "ι"
+  | i :: is -> "{" ^ List.fold_right (fun i acc -> i ^ " " ^ acc) is (i ^ "}")
 
 let string_of_op : op -> string = function Raise -> "raise" | Put -> "put" | Get -> "get"
 
@@ -91,7 +92,7 @@ let rec string_of_expr : expr -> string =
       "handle_" ^ a ^ ":" ^ string_of_signature s ^ " " ^ string_of_expr e ^ " "
       ^ string_of_handler h
   | ILam (a, s, e)      -> "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
-  | IApp (e, a)         -> "(" ^ string_of_expr e ^ ")<" ^ a ^ ">"
+  | IApp (e, a)         -> aux e ^ "<" ^ a ^ ">"
   | e'                  -> aux e'
 
 and string_of_handler : handler -> string = function
@@ -106,35 +107,36 @@ and string_of_handler : handler -> string = function
 let string_of_type_effect : type_effect -> string = function
   | t, e -> string_of_type t ^ " / " ^ string_of_effect e
 
+let (freshTV : unit -> typ), (refreshTV : unit -> unit) =
+  let counter = ref (int_of_char 'a' - 1) in
+  ( (fun () ->
+      incr counter ;
+      TV (ref (Free (Printf.sprintf "%c" (char_of_int !counter)))))
+  , fun () -> counter := int_of_char 'a' - 1 )
+
 let signature_of_instance (theta : ienv) (a : instance) : signature =
   match List.assoc_opt a theta with
-  | None        -> raise (IllTyped ("Free instance " ^ a))
-  | Some (s, _) -> s
+  | None -> raise (IllTyped ("Free instance " ^ a))
+  | Some (SV {contents= Bound s}) | Some s -> s
 
-let type_of_op (theta : ienv) (a : instance) (op : op) : op_type =
-  match List.assoc_opt a theta with
-  | None          -> raise (IllTyped ("Free instance " ^ a))
-  | Some (s, ops) ->
-  match List.assoc_opt op ops with
-  | Some t -> t
-  | None   ->
+let type_of_op (s : signature) (a : instance) (op : op) : op_type =
+  match (s, op) with
+  | Error, Raise -> (Unit, freshTV (), [a])
+  | State t, Put -> (t, Unit, [a])
+  | State t, Get -> (Unit, t, [a])
+  (*| SV sv, Raise -> union (sv, Error) ?????*)
+  | s, op ->
       raise
         (IllTyped
            ( "Instance " ^ a ^ ":" ^ string_of_signature s ^ " doesn't define operator "
            ^ string_of_op op ))
 
+let type_of_op_in_env (theta : ienv) (a : instance) (op : op) : op_type =
+  type_of_op (signature_of_instance theta a) a op
+
 let combine (e1 : effect) (e2 : effect) : effect =
-  let rec aux es1 es2 =
-    match (es1, es2) with
-    | [], es | es, []      -> es
-    | e1 :: es1, e2 :: es2 ->
-        if e1 < e2 then e1 :: aux es1 (e2 :: es2)
-        else if e1 > e2 then e2 :: aux (e1 :: es1) es2
-        else e1 :: aux es1 es2
-  in
-  match (e1, e2) with
-  | Pure, e | e, Pure      -> e
-  | Effect es1, Effect es2 -> Effect (aux es1 es2)
+  (* TODO? *)
+  List.merge compare e1 e2
 
 let rec occurs (x : identifier) : typ -> bool = function
   | Arrow (t1, t2, _)     -> occurs x t1 || occurs x t2
@@ -167,13 +169,6 @@ let type_of_var (gamma : env) (v : var) : typ =
   match List.assoc_opt v gamma with
   | None   -> raise (IllTyped ("Free variable " ^ v))
   | Some t -> find t
-
-let (freshTV : unit -> typ), (refreshTV : unit -> unit) =
-  let counter = ref (int_of_char 'a' - 1) in
-  ( (fun () ->
-      incr counter ;
-      TV (ref (Free (Printf.sprintf "%c" (char_of_int !counter)))))
-  , fun () -> counter := int_of_char 'a' - 1 )
 
 let unify_types (t : typ) (cs : (typ * typ) list) : typ = List.iter union cs ; find t
 
@@ -219,10 +214,12 @@ let instantiate (t : typ) : typ =
   in
   fst (instantiate' t [])
 
+let ( <: ) (e1 : effect) (e2 : effect) : bool =
+  (* TODO *)
+  e1 = e2
+
 let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
-  let rec aux_eff = function
-    | Effect es -> Effect (List.map (fun (a', s') -> if a' = a then (b, s') else (a', s')) es)
-    | e         -> e
+  let rec aux_eff = List.map (fun a' -> if a' = a then b else a')
   and aux_type = function
     | Forall (a', s', t') when a' != a -> Forall (a', s', aux_type t')
     | Arrow (t1, t2, eff) -> Arrow (t1, t2, aux_eff eff)
@@ -233,23 +230,23 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
 let rec infer (gamma : env) (theta : ienv) (expr : expr) (cs : (typ * typ) list) :
     env * type_effect * (typ * typ) list =
   match expr with
-  | Nil                            -> (gamma, (Unit, Pure), cs)
-  | I _                            -> (gamma, (Int, Pure), cs)
-  | V v                            -> (gamma, (instantiate (type_of_var gamma v), Pure), cs)
+  | Nil                            -> (gamma, (Unit, pure), cs)
+  | I _                            -> (gamma, (Int, pure), cs)
+  | V v                            -> (gamma, (instantiate (type_of_var gamma v), pure), cs)
   | Lam (x, e)                     ->
       let tx = freshTV () in
       let _, (te, eff), cse = infer ((x, tx) :: gamma) theta e cs in
-      (gamma, (Arrow (tx, te, eff), Pure), cse)
+      (gamma, (Arrow (tx, te, eff), pure), cse)
   | Let (x, e, e')                 ->
       let _, (te, eff), cse = infer gamma theta e cs in
-      if eff = Pure then
+      if eff = pure then
         infer ((x, generalize gamma (unify_types te cse)) :: gamma) theta e' []
       else infer ((x, unify_types te cse) :: gamma) theta e' []
   | App (e1, e2)                   -> (
       let _, (t1, ef1), cs1 = infer gamma theta e1 cs in
       let _, (t2, ef2), cs2 = infer gamma theta e2 cs1 in
       let t = freshTV () in
-      match unify_types t1 ((t1, Arrow (t2, t, Pure)) :: cs2) with
+      match unify_types t1 ((t1, Arrow (t2, t, pure)) :: cs2) with
       | Arrow (t1', t1'', eff) -> (gamma, (t, combine eff (combine ef1 ef2)), [])
       | _                      ->
           raise
@@ -257,35 +254,24 @@ let rec infer (gamma : env) (theta : ienv) (expr : expr) (cs : (typ * typ) list)
                ( string_of_expr e1 ^ " should have type " ^ string_of_type t2 ^ " -> "
                ^ string_of_type t ^ "instead of " ^ string_of_type t1 )) )
   | Op (a, op, e)                  ->
-      let t1, t2, op_eff = type_of_op theta a op in
+      let t1, t2, op_eff = type_of_op_in_env theta a op in
       let _, (e_t, e_eff), e_cs = infer gamma theta e cs in
       (gamma, (t2, combine e_eff op_eff), (e_t, t1) :: e_cs)
   | Handle (a, s, e, (hs, x, ret)) ->
       let t = freshTV () in
       let infer_handler (op, x, r, e) (hts, hcs) =
-        let t1, t2 =
-          match (op, s) with
-          | Put, State t' -> (t', Unit)
-          | Get, State t' -> (Unit, t')
-          | _             -> (freshTV (), freshTV ())
-        in
+        let t1, t2, eff = type_of_op s a op in
         let _, (th, _), csh =
-          infer ((x, t1) :: (r, Arrow (t2, t, Pure)) :: gamma) theta e hcs
+          infer ((x, t1) :: (r, Arrow (t2, t, eff)) :: gamma) theta e hcs
         in
-        ((op, (t1, t2, Effect [(a, s)])) :: hts, (th, t) :: csh)
+        ((op, (t1, t2, [(a, s)])) :: hts, (th, t) :: csh)
       in
-      let ops, cs' = List.fold_right infer_handler hs ([], cs) in
-      let _, (e_t, e_eff), e_cs = infer gamma ((a, (s, ops)) :: theta) e cs' in
+      let _, cs' = List.fold_right infer_handler hs ([], cs) in
+      let _, (e_t, e_eff), e_cs = infer gamma ((a, s) :: theta) e cs' in
       let _, (ret_t, ret_eff), ret_cs = infer ((x, e_t) :: gamma) theta ret e_cs in
-      (gamma, (ret_t, combine e_eff ret_eff), (ret_t, t) :: ret_cs)
+      (gamma, (ret_t, ret_eff), (ret_t, t) :: ret_cs)
   | ILam (a, s, e)                 ->
-      let eff = Effect [(a, s)] in
-      let ops =
-        match s with
-        | Error   -> [(Raise, (freshTV (), freshTV (), eff))]
-        | State t -> [(Put, (t, Unit, eff)); (Get, (Unit, t, eff))]
-      in
-      let _, (t', eff'), cs' = infer gamma ((a, (s, ops)) :: theta) e cs in
+      let _, (t', eff'), cs' = infer gamma ((a, s) :: theta) e cs in
       (gamma, (Forall (a, s, t'), eff'), cs')
   | IApp (e, a)                    -> (
       let _, (t', eff'), cs' = infer gamma theta e cs in
@@ -304,4 +290,4 @@ let infer_type (expr : expr) : env * typ * effect =
     (gamma, unify_types t cs, e)
   with IllTyped e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
-    ([], Bad, Pure)
+    ([], Bad, pure)
