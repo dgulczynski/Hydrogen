@@ -4,7 +4,13 @@ type var = identifier
 
 type instance = identifier
 
+type 'a environment = (identifier * 'a) list
+
 type 'a univar = Free of identifier | Bound of 'a
+
+type 'a set = 'a list
+
+type 'a constraints = ('a * 'a) list
 
 type typ =
   | Unit
@@ -15,11 +21,9 @@ type typ =
   | Forall of instance * signature * typ
   | Bad
 
-and signature = Error | State of typ | SV of signature univar ref
+and signature = Error | State of typ
 
-and effect = instance list
-
-type op_type = typ * typ * effect
+and effect = Fixed of instance set | Flexible of instance set * effect univar ref
 
 type type_effect = typ * effect
 
@@ -39,7 +43,7 @@ and op = Raise | Get | Put
 
 and handler = (op * var * var * expr) list * var * expr
 
-type 'a environment = (identifier * 'a) list
+type op_type = typ * typ * effect
 
 type env = typ environment
 
@@ -47,7 +51,27 @@ type ienv = signature environment
 
 exception IllTyped of string
 
-let pure : effect = []
+let empty : 'a set = []
+
+let singleton (x : 'a) : 'a set = [x]
+
+let rec diff (xs : 'a set) (ys : 'a set) : 'a set =
+  match (xs, ys) with
+  | [], _ -> []
+  | xs, [] -> xs
+  | (x :: xs' as xs), (y :: ys' as ys) ->
+      if x < y then x :: diff xs' ys else if x = y then diff xs' ys' else diff xs ys'
+
+let rec merge (xs : 'a set) (ys : 'a set) : 'a set =
+  match (xs, ys) with
+  | [], ys -> ys
+  | xs, [] -> xs
+  | (x :: xs' as xs), (y :: ys' as ys) ->
+      if x < y then x :: merge xs' ys
+      else if x = y then x :: merge xs' ys'
+      else y :: merge xs ys'
+
+let pure : effect = Fixed empty
 
 let rec string_of_type : typ -> string = function
   | Unit                   -> "Unit"
@@ -56,8 +80,7 @@ let rec string_of_type : typ -> string = function
       ( match t1 with
       | Arrow _ -> "(" ^ string_of_type t1 ^ ") "
       | _       -> string_of_type t1 ^ " " )
-      ^ (if eff = [] then "" else "-" ^ string_of_effect eff)
-      ^ "-> " ^ string_of_type t2
+      ^ "-" ^ string_of_effect eff ^ "-> " ^ string_of_type t2
   | TV {contents= Free a}  -> a
   | TV {contents= Bound t} -> string_of_type t
   | GV v                   -> "'" ^ v
@@ -65,14 +88,18 @@ let rec string_of_type : typ -> string = function
   | Bad                    -> "ILL-TYPED"
 
 and string_of_signature : signature -> string = function
-  | Error                  -> "Error"
-  | State t                -> "State(" ^ string_of_type t ^ ")"
-  | SV {contents= Free a}  -> a
-  | SV {contents= Bound s} -> string_of_signature s
+  | Error   -> "Error"
+  | State t -> "State(" ^ string_of_type t ^ ")"
 
-and string_of_effect : effect -> string = function
-  | []      -> "ι"
-  | i :: is -> "{" ^ List.fold_right (fun i acc -> i ^ " " ^ acc) is (i ^ "}")
+and string_of_effect : effect -> string =
+  let aux = function
+    | []      -> "ι"
+    | i :: is -> List.fold_right (fun i acc -> i ^ " " ^ acc) is i
+  in
+  function
+  | Fixed is -> aux is
+  | Flexible (is, {contents= Free a}) -> aux is ^ a
+  | Flexible (is, {contents= Bound e}) -> aux is ^ string_of_effect e
 
 let string_of_op : op -> string = function Raise -> "raise" | Put -> "put" | Get -> "get"
 
@@ -116,16 +143,16 @@ let (freshTV : unit -> typ), (refreshTV : unit -> unit) =
 
 let signature_of_instance (theta : ienv) (a : instance) : signature =
   match List.assoc_opt a theta with
-  | None -> raise (IllTyped ("Free instance " ^ a))
-  | Some (SV {contents= Bound s}) | Some s -> s
+  | None   -> raise (IllTyped ("Free instance " ^ a))
+  | Some s -> s
 
 let type_of_op (s : signature) (a : instance) (op : op) : op_type =
+  let eff = Fixed (singleton a) in
   match (s, op) with
-  | Error, Raise -> (Unit, freshTV (), [a])
-  | State t, Put -> (t, Unit, [a])
-  | State t, Get -> (Unit, t, [a])
-  (*| SV sv, Raise -> union (sv, Error) ?????*)
-  | s, op ->
+  | Error, Raise -> (Unit, freshTV (), eff)
+  | State t, Put -> (t, Unit, eff)
+  | State t, Get -> (Unit, t, eff)
+  | s, op        ->
       raise
         (IllTyped
            ( "Instance " ^ a ^ ":" ^ string_of_signature s ^ " doesn't define operator "
@@ -133,10 +160,6 @@ let type_of_op (s : signature) (a : instance) (op : op) : op_type =
 
 let type_of_op_in_env (theta : ienv) (a : instance) (op : op) : op_type =
   type_of_op (signature_of_instance theta a) a op
-
-let combine (e1 : effect) (e2 : effect) : effect =
-  (* TODO? *)
-  List.merge compare e1 e2
 
 let rec occurs (x : identifier) : typ -> bool = function
   | Arrow (t1, t2, _)     -> occurs x t1 || occurs x t2
@@ -165,12 +188,41 @@ let rec union ((t1, t2) : typ * typ) : unit =
   | t1', t2' ->
       raise (IllTyped ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
 
+let rec find_e : effect -> effect = function
+  | Flexible (is, {contents= Bound e}) -> (
+    match find_e e with
+    | Fixed is'          -> Fixed (merge is is')
+    | Flexible (is', e') -> Flexible (merge is is', e') )
+  | e -> e
+
+let rec union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect constraints =
+  let expand v = function
+    | [] -> ()
+    | is ->
+        let u = ref (Free "u") in
+        v := Bound (Flexible (is, u))
+  in
+  match (find_e e1, find_e e2) with
+  | Fixed i1, Flexible (i2, v2) ->
+      expand v2 (diff i1 i2) ;
+      ecs
+  | Flexible (i1, v1), Flexible (i2, v2) ->
+      expand v2 (diff i1 i2) ;
+      (Flexible (empty, v1), Flexible (empty, v2)) :: ecs
+  | Flexible (i1, _), Fixed i2 | Fixed i1, Fixed i2 ->
+  match diff i1 i2 with
+  | [] -> ecs
+  | _  ->
+      raise
+        (IllTyped
+           ("Effect " ^ string_of_effect e1 ^ " does not subtype " ^ string_of_effect e2))
+
 let type_of_var (gamma : env) (v : var) : typ =
   match List.assoc_opt v gamma with
   | None   -> raise (IllTyped ("Free variable " ^ v))
   | Some t -> find t
 
-let unify_types (t : typ) (cs : (typ * typ) list) : typ = List.iter union cs ; find t
+let unify_types (t : typ) (cs : typ constraints) : typ = List.iter union cs ; find t
 
 let generalize (gamma : env) (t : typ) : typ =
   let rec generalize' ftv = function
@@ -214,21 +266,19 @@ let instantiate (t : typ) : typ =
   in
   fst (instantiate' t [])
 
-let ( <: ) (e1 : effect) (e2 : effect) : bool =
-  (* TODO *)
-  e1 = e2
-
 let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
-  let rec aux_eff = List.map (fun a' -> if a' = a then b else a')
+  let rec aux_eff =
+    let f = List.map (fun a' -> if a' = a then b else a') in
+    function Fixed is -> Fixed (f is) | Flexible (is, e) -> Flexible (f is, e)
   and aux_type = function
     | Forall (a', s', t') when a' != a -> Forall (a', s', aux_type t')
     | Arrow (t1, t2, eff) -> Arrow (t1, t2, aux_eff eff)
     | t -> t
   in
-  function t, e -> (aux_type (find t), aux_eff e)
+  function t, e -> (aux_type (find t), aux_eff (find_e e))
 
-let rec infer (gamma : env) (theta : ienv) (expr : expr) (cs : (typ * typ) list) :
-    env * type_effect * (typ * typ) list =
+let rec infer (gamma : env) (theta : ienv) (expr : expr) (cs : typ constraints) :
+    env * type_effect * typ constraints =
   match expr with
   | Nil                            -> (gamma, (Unit, pure), cs)
   | I _                            -> (gamma, (Int, pure), cs)
@@ -247,7 +297,7 @@ let rec infer (gamma : env) (theta : ienv) (expr : expr) (cs : (typ * typ) list)
       let _, (t2, ef2), cs2 = infer gamma theta e2 cs1 in
       let t = freshTV () in
       match unify_types t1 ((t1, Arrow (t2, t, pure)) :: cs2) with
-      | Arrow (t1', t1'', eff) -> (gamma, (t, combine eff (combine ef1 ef2)), [])
+      | Arrow (t1', t1'', eff) -> (gamma, (t, eff), [])
       | _                      ->
           raise
             (IllTyped
@@ -256,7 +306,7 @@ let rec infer (gamma : env) (theta : ienv) (expr : expr) (cs : (typ * typ) list)
   | Op (a, op, e)                  ->
       let t1, t2, op_eff = type_of_op_in_env theta a op in
       let _, (e_t, e_eff), e_cs = infer gamma theta e cs in
-      (gamma, (t2, combine e_eff op_eff), (e_t, t1) :: e_cs)
+      (gamma, (t2, e_eff), (e_t, t1) :: e_cs)
   | Handle (a, s, e, (hs, x, ret)) ->
       let t = freshTV () in
       let infer_handler (op, x, r, e) (hts, hcs) =
