@@ -141,6 +141,13 @@ let (freshTV : unit -> typ), (refreshTV : unit -> unit) =
       TV (ref (Free (Printf.sprintf "%c" (char_of_int !counter)))))
   , fun () -> counter := int_of_char 'a' - 1 )
 
+let (freshEV : unit -> effect), (refreshEV : unit -> unit) =
+  let counter = ref (-1) in
+  ( (fun () ->
+      incr counter ;
+      Flexible (empty, ref (Free (Printf.sprintf "%c" (char_of_int !counter)))))
+  , fun () -> counter := -1 )
+
 let signature_of_instance (theta : ienv) (a : instance) : signature =
   match List.assoc_opt a theta with
   | None   -> raise (IllTyped ("Free instance " ^ a))
@@ -277,27 +284,30 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
   in
   function t, e -> (aux_type (find t), aux_eff (find_e e))
 
-let rec infer (gamma : env) (theta : ienv) (expr : expr) (cs : typ constraints) :
-    env * type_effect * typ constraints =
+let rec infer (gamma : env) (theta : ienv) (expr : expr) (cs : typ constraints)
+    (ecs : effect constraints) : env * type_effect * typ constraints * effect constraints =
   match expr with
-  | Nil                            -> (gamma, (Unit, pure), cs)
-  | I _                            -> (gamma, (Int, pure), cs)
-  | V v                            -> (gamma, (instantiate (type_of_var gamma v), pure), cs)
+  | Nil                            -> (gamma, (Unit, pure), cs, ecs)
+  | I _                            -> (gamma, (Int, pure), cs, ecs)
+  | V v                            -> ( gamma
+                                      , (instantiate (type_of_var gamma v), pure)
+                                      , cs
+                                      , ecs )
   | Lam (x, e)                     ->
       let tx = freshTV () in
-      let _, (te, eff), cse = infer ((x, tx) :: gamma) theta e cs in
-      (gamma, (Arrow (tx, te, eff), pure), cse)
+      let _, (te, eff), cs', ecs' = infer ((x, tx) :: gamma) theta e cs ecs in
+      (gamma, (Arrow (tx, te, eff), pure), cs', ecs')
   | Let (x, e, e')                 ->
-      let _, (te, eff), cse = infer gamma theta e cs in
+      let _, (te, eff), cs', ecs' = infer gamma theta e cs ecs in
       if eff = pure then
-        infer ((x, generalize gamma (unify_types te cse)) :: gamma) theta e' []
-      else infer ((x, unify_types te cse) :: gamma) theta e' []
+        infer ((x, generalize gamma (unify_types te cs')) :: gamma) theta e' [] ecs'
+      else infer ((x, unify_types te cs') :: gamma) theta e' [] ecs'
   | App (e1, e2)                   -> (
-      let _, (t1, ef1), cs1 = infer gamma theta e1 cs in
-      let _, (t2, ef2), cs2 = infer gamma theta e2 cs1 in
+      let _, (t1, ef1), cs1, ecs1 = infer gamma theta e1 cs ecs in
+      let _, (t2, ef2), cs2, ecs2 = infer gamma theta e2 cs1 ecs1 in
       let t = freshTV () in
       match unify_types t1 ((t1, Arrow (t2, t, pure)) :: cs2) with
-      | Arrow (t1', t1'', eff) -> (gamma, (t, eff), [])
+      | Arrow (t1', t1'', eff) -> (gamma, (t, eff), [], ecs2)
       | _                      ->
           raise
             (IllTyped
@@ -305,28 +315,32 @@ let rec infer (gamma : env) (theta : ienv) (expr : expr) (cs : typ constraints) 
                ^ string_of_type t ^ "instead of " ^ string_of_type t1 )) )
   | Op (a, op, e)                  ->
       let t1, t2, op_eff = type_of_op_in_env theta a op in
-      let _, (e_t, e_eff), e_cs = infer gamma theta e cs in
-      (gamma, (t2, e_eff), (e_t, t1) :: e_cs)
+      let _, (e_t, e_eff), e_cs, e_ecs = infer gamma theta e cs ecs in
+      (gamma, (t2, e_eff), (e_t, t1) :: e_cs, e_ecs)
   | Handle (a, s, e, (hs, x, ret)) ->
-      let t = freshTV () in
-      let infer_handler (op, x, r, e) (hts, hcs) =
+      (* raise (IllTyped ("not implemented")) *)
+      let t = freshTV () and eff = freshEV () in
+      let infer_handler (op, x, r, e) (cs, ecs) =
         let t1, t2, eff = type_of_op s a op in
-        let _, (th, _), csh =
-          infer ((x, t1) :: (r, Arrow (t2, t, eff)) :: gamma) theta e hcs
+        let _, (th, eh), cs', ecs' =
+          infer ((x, t1) :: (r, Arrow (t2, t, eff)) :: gamma) theta e cs ecs
         in
-        ((op, (t1, t2, [(a, s)])) :: hts, (th, t) :: csh)
+        ((th, t) :: cs', (eh, eff) :: ecs')
       in
-      let _, cs' = List.fold_right infer_handler hs ([], cs) in
-      let _, (e_t, e_eff), e_cs = infer gamma ((a, s) :: theta) e cs' in
-      let _, (ret_t, ret_eff), ret_cs = infer ((x, e_t) :: gamma) theta ret e_cs in
-      (gamma, (ret_t, ret_eff), (ret_t, t) :: ret_cs)
+      let cs', ecs' = List.fold_right infer_handler hs (cs, ecs) in
+      let _, (e_t, e_eff), e_cs, e_ecs = infer gamma ((a, s) :: theta) e cs' ecs' in
+      let _, (ret_t, ret_eff), ret_cs, ret_ecs =
+        infer ((x, e_t) :: gamma) theta ret e_cs e_ecs
+      in
+      (gamma, (ret_t, ret_eff), (ret_t, t) :: ret_cs, (ret_eff, eff) :: ret_ecs)
   | ILam (a, s, e)                 ->
-      let _, (t', eff'), cs' = infer gamma ((a, s) :: theta) e cs in
-      (gamma, (Forall (a, s, t'), eff'), cs')
+      let _, (t', eff'), cs', ecs' = infer gamma ((a, s) :: theta) e cs ecs in
+      (gamma, (Forall (a, s, t'), eff'), cs', ecs')
   | IApp (e, a)                    -> (
-      let _, (t', eff'), cs' = infer gamma theta e cs in
+      let _, (t', eff'), cs', ecs' = infer gamma theta e cs ecs in
       match (find t', signature_of_instance theta a) with
-      | Forall (a', s', t'), s when s = s' -> (gamma, subst_instance a' a (t', eff'), cs')
+      | Forall (a', s', t'), s when s = s' ->
+          (gamma, subst_instance a' a (t', eff'), cs', ecs')
       | t', s ->
           raise
             (IllTyped
@@ -336,7 +350,7 @@ let rec infer (gamma : env) (theta : ienv) (expr : expr) (cs : typ constraints) 
 let infer_type (expr : expr) : env * typ * effect =
   try
     refreshTV () ;
-    let gamma, (t, e), cs = infer [] [] expr [] in
+    let gamma, (t, e), cs, ecs = infer [] [] expr [] [] in
     (gamma, unify_types t cs, e)
   with IllTyped e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
