@@ -43,7 +43,7 @@ and op = Raise | Get | Put
 
 and handler = (op * var * var * expr) list * var * expr
 
-type op_type = typ * typ * effect
+type op_type = typ * typ
 
 type env = typ environment
 
@@ -155,11 +155,10 @@ let signature_of_instance (theta : ienv) (a : instance) : signature =
   | Some s -> s
 
 let type_of_op (s : signature) (a : instance) (op : op) : op_type =
-  let eff = Fixed (singleton a) in
   match (s, op) with
-  | Error, Raise -> (Unit, freshTV (), eff)
-  | State t, Put -> (t, Unit, eff)
-  | State t, Get -> (Unit, t, eff)
+  | Error, Raise -> (Unit, freshTV ())
+  | State t, Put -> (t, Unit)
+  | State t, Get -> (Unit, t)
   | s, op        ->
       raise
         (IllTyped
@@ -316,8 +315,8 @@ let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
         let _, (te, eff) = infer gamma theta e in
         solve_typ_constraints () ;
         let tx = find_t te in
-        let gamma' = (x, if find_e eff = pure then generalize gamma tx else tx) :: gamma in
-        infer gamma' theta e'
+        let x_tx = (x, if find_e eff = pure then generalize gamma tx else tx) in
+        infer (x_tx :: gamma) theta e'
     | App (e1, e2)                   ->
         let _, (t1, ef1) = infer gamma theta e1 in
         let _, (t2, ef2) = infer gamma theta e2 in
@@ -328,17 +327,16 @@ let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
         constrain_eff (ef2, eff) ;
         (gamma, (t, eff))
     | Op (a, op, e)                  ->
-        let t1, t2, op_eff = type_of_op_in_env theta a op in
+        let t1, t2 = type_of_op_in_env theta a op in
         let _, (e_t, e_eff) = infer gamma theta e in
-        let eff = freshEV empty in
+        let eff = freshEV [a] in
         constrain_typ (e_t, t1) ;
-        constrain_eff (op_eff, eff) ;
         constrain_eff (e_eff, eff) ;
         (gamma, (t2, eff))
     | Handle (a, s, e, (hs, x, ret)) ->
         let t = freshTV () and eff = freshEV empty in
         let infer_handler (op, x, r, e) =
-          let t1, t2, eff = type_of_op s a op in
+          let t1, t2 = type_of_op s a op in
           let _, (th, eh) = infer ((x, t1) :: (r, Arrow (t2, t, eff)) :: gamma) theta e in
           constrain_typ (th, t) ;
           constrain_eff (eh, eff)
