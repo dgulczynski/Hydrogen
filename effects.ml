@@ -296,83 +296,85 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
 let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
     (type_cs : typ constraints) (effect_cs : effect constraints) :
     env * type_effect * typ constraints * effect constraints =
-  let tcs = ref type_cs and ecs = ref effect_cs in
-  let constrain_typ tc = tcs := tc :: !tcs
+  let tcs = ref type_cs and ecs = ref effect_cs and env = ref [] in
+  let add_to_env x_t = env := x_t :: !env
+  and constrain_typ tc = tcs := tc :: !tcs
   and constrain_eff ec = ecs := ec :: !ecs
   and solve_typ_constraints () =
     ecs := List.fold_right union_t !tcs !ecs ;
     tcs := []
   and solve_eff_constraints () = ecs := List.fold_right union_e !ecs [] in
   let rec infer gamma theta = function
-    | Nil                            -> (gamma, (Unit, pure))
-    | I _                            -> (gamma, (Int, pure))
-    | V v                            -> (gamma, (instantiate (type_of_var gamma v), pure))
+    | Nil                            -> (Unit, pure)
+    | I _                            -> (Int, pure)
+    | V v                            -> (instantiate (type_of_var gamma v), pure)
     | Lam (x, e)                     ->
         let tx = freshTV () in
-        let _, (te, eff) = infer ((x, tx) :: gamma) theta e in
-        (gamma, (Arrow (tx, te, eff), pure))
+        let te, eff = infer ((x, tx) :: gamma) theta e in
+        (Arrow (tx, te, eff), pure)
     | Let (x, e, e')                 ->
-        let _, (te, eff) = infer gamma theta e in
+        let te, eff = infer gamma theta e in
         solve_typ_constraints () ;
         let tx = find_t te in
         let x_tx = (x, if find_e eff = pure then generalize gamma tx else tx) in
+        add_to_env x_tx ;
         infer (x_tx :: gamma) theta e'
     | App (e1, e2)                   ->
-        let _, (t1, ef1) = infer gamma theta e1 in
-        let _, (t2, ef2) = infer gamma theta e2 in
+        let t1, ef1 = infer gamma theta e1 in
+        let t2, ef2 = infer gamma theta e2 in
         let t = freshTV () and eff_arr = freshEV empty and eff = freshEV empty in
         constrain_typ (t1, Arrow (t2, t, eff_arr)) ;
         constrain_eff (eff_arr, eff) ;
         constrain_eff (ef1, eff) ;
         constrain_eff (ef2, eff) ;
-        (gamma, (t, eff))
+        (t, eff)
     | Op (a, op, e)                  ->
         let t1, t2 = type_of_op_in_env theta a op in
-        let _, (e_t, e_eff) = infer gamma theta e in
+        let e_t, e_eff = infer gamma theta e in
         let eff = freshEV [a] in
         constrain_typ (e_t, t1) ;
         constrain_eff (e_eff, eff) ;
-        (gamma, (t2, eff))
+        (t2, eff)
     | Handle (a, s, e, (hs, x, ret)) ->
         let t = freshTV () and eff = freshEV empty in
         let infer_handler (op, x, r, e) =
           let t1, t2 = type_of_op s a op in
-          let _, (th, eh) = infer ((x, t1) :: (r, Arrow (t2, t, eff)) :: gamma) theta e in
+          let th, eh = infer ((x, t1) :: (r, Arrow (t2, t, eff)) :: gamma) theta e in
           constrain_typ (th, t) ;
           constrain_eff (eh, eff)
         in
         List.iter infer_handler hs ;
-        let _, (e_t, e_eff) = infer gamma ((a, s) :: theta) e in
-        let _, (ret_t, ret_eff) = infer ((x, e_t) :: gamma) theta ret in
+        let e_t, e_eff = infer gamma ((a, s) :: theta) e in
+        let ret_t, ret_eff = infer ((x, e_t) :: gamma) theta ret in
         (* all a occurences should be found at this point??? *)
         constrain_typ (ret_t, t) ;
         constrain_eff (ret_eff, eff) ;
-        (gamma, (t, eff))
+        (t, eff)
     | ILam (a, s, e)                 ->
-        let _, (t', eff') = infer gamma ((a, s) :: theta) e in
+        let t', eff' = infer gamma ((a, s) :: theta) e in
         constrain_eff (eff', pure) ;
-        (gamma, (Forall (a, s, t'), pure))
+        (Forall (a, s, t'), pure)
     | IApp (e, a)                    -> (
-        let _, (t', eff') = infer gamma theta e in
+        let t', eff' = infer gamma theta e in
         match (find_t t', signature_of_instance theta a) with
-        | Forall (a', s', t'), s when s = s' -> (gamma, subst_instance a' a (t', eff'))
+        | Forall (a', s', t'), s when s = s' -> subst_instance a' a (t', eff')
         | t', s ->
             raise
               (IllTyped
                  ( "Instance " ^ a ^ ":" ^ string_of_signature s ^ " application to "
                  ^ string_of_type_effect (t', eff') )) )
   in
-  let gamma', (typ, eff) = infer gamma theta expr in
+  let typ, eff = infer gamma theta expr in
   solve_typ_constraints () ;
   solve_eff_constraints () ;
-  (gamma', (find_t typ, find_e eff), !tcs, !ecs)
+  (!env, (find_t typ, find_e eff), !tcs, !ecs)
 
 let infer_type (expr : expr) : env * typ * effect =
   try
     refreshTV () ;
     refreshEV () ;
-    let gamma, (typ, eff), cs, ecs = infer_type_with_constraints [] [] expr [] [] in
-    (gamma, typ, eff)
+    let env, (typ, eff), cs, ecs = infer_type_with_constraints [] [] expr [] [] in
+    (env, typ, eff)
   with IllTyped e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
     ([], Bad, pure)

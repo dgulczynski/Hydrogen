@@ -2,12 +2,12 @@
 #use "effects.ml"
 
 let print_inferred_type (expr : expr) : unit =
-  let gamma, t, e = infer_type expr in
+  let env, t, e = infer_type expr in
   print_string ("Type / effect of " ^ string_of_expr expr ^ " is ") ;
-  if gamma = [] then print_string (string_of_type_effect (t, e) ^ "\n")
+  if env = [] then print_string (string_of_type_effect (t, e) ^ "\n")
   else (
     print_string (string_of_type_effect (t, e) ^ " with env:") ;
-    List.iter (fun (x, t) -> print_string (" (" ^ x ^ " : " ^ string_of_type t ^ ")")) gamma ;
+    List.iter (fun (x, t) -> print_string (" (" ^ x ^ " : " ^ string_of_type t ^ ")")) env ;
     print_newline () )
 
 let print_examples (name : string) (es : expr list) =
