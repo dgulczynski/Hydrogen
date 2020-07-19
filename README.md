@@ -21,5 +21,5 @@ Nested effects:
 Type / effect of λy. handle_a:State(Int) handle_b:State(Int -ι-> Int) put_a ((get_b ()) y) {get () k. k (λx. x) | return x. x} {put v k. k () | return x. x} is Int -?e0-> Unit / ι
 
 Instance application:
-Type / effect of let putx = λs:State(Int). λx. put_s x in handle_a:State(Int) (putx<a>) 1 {put v k. k () | get () k. k 1 | return x. 2} is Int / ?e1 with env: (putx : ∀s:State(Int). Int -{s}?e8-> Unit)
+Type / effect of let putx = λs:State(Int). λx. put_s x in handle_a:State(Int) (putx<a>) 1 {put v k. k () | get () k. k 1 | return x. 2} is Int / ?e1 with env: (putx : ∀s:State(Int). Int -{s}?e10-> Unit)
 ```

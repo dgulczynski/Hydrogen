@@ -174,36 +174,36 @@ let rec occurs (x : identifier) : typ -> bool = function
   | TV {contents= Free a} -> x = a
   | _                     -> false
 
-let rec find : typ -> typ = function
-  | Arrow (t1, t2, eff)            -> Arrow (find t1, find t2, eff)
+let rec find_t : typ -> typ = function
+  | Arrow (t1, t2, eff)            -> Arrow (find_t t1, find_t t2, find_e eff)
   | TV ({contents= Bound t} as tv) ->
-      let t' = find t in
+      let t' = find_t t in
       tv := Bound t' ;
       t'
   | t                              -> t
 
-let rec union ((t1, t2) : typ * typ) : unit =
-  match (find t1, find t2) with
-  | t1', t2' when t1' = t2' -> ()
-  | Arrow (a1, b1, _), Arrow (a2, b2, _) ->
-      union (a1, a2) ;
-      union (b1, b2)
-  | TV {contents= Bound t}, t' | t', TV {contents= Bound t} -> union (t, t')
-  | TV ({contents= Free a} as tv), t' | t', TV ({contents= Free a} as tv) ->
-      if occurs a t' then
-        raise (IllTyped ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
-      else tv := Bound t'
-  | t1', t2' ->
-      raise (IllTyped ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
-
-let rec find_e : effect -> effect = function
+and find_e : effect -> effect = function
   | Flexible (is, {contents= Bound e}) -> (
     match find_e e with
     | Fixed is'          -> Fixed (merge is is')
     | Flexible (is', e') -> Flexible (merge is is', e') )
   | e -> e
 
-let rec union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect constraints =
+let rec union_t ((t1, t2) : typ * typ) (ecs : effect constraints) : effect constraints =
+  match (find_t t1, find_t t2) with
+  | t1', t2' when t1' = t2' -> ecs
+  | Arrow (a1, b1, e1), Arrow (a2, b2, e2) ->
+      union_t (b1, b2) (union_e (e1, e2) (union_t (a1, a2) ecs))
+  | TV {contents= Bound t}, t' | t', TV {contents= Bound t} -> union_t (t, t') ecs
+  | TV ({contents= Free a} as tv), t' | t', TV ({contents= Free a} as tv) ->
+      if occurs a t' then
+        raise (IllTyped ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
+      else tv := Bound t' ;
+      ecs
+  | t1', t2' ->
+      raise (IllTyped ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
+
+and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect constraints =
   let expand v = function [] -> () | is -> v := Bound (freshEV is) in
   let on_failed_subtyping e1 e2 =
     raise
@@ -239,9 +239,7 @@ let simplify_e (ecs : effect constraints) : unit =
 let type_of_var (gamma : env) (v : var) : typ =
   match List.assoc_opt v gamma with
   | None   -> raise (IllTyped ("Free variable " ^ v))
-  | Some t -> find t
-
-let unify_types (t : typ) (cs : typ constraints) : typ = List.iter union cs ; find t
+  | Some t -> find_t t
 
 let generalize (gamma : env) (t : typ) : typ =
   let rec generalize' ftv = function
@@ -256,7 +254,7 @@ let generalize (gamma : env) (t : typ) : typ =
   and free_type_variables = function
     | []      -> []
     | t :: ts ->
-    match find t with
+    match find_t t with
     | Arrow (t1, t2, _)     -> free_type_variables (t1 :: t2 :: ts)
     | TV {contents= Free a} -> a :: free_type_variables ts
     | _                     -> free_type_variables ts
@@ -294,7 +292,7 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
     | Arrow (t1, t2, eff) -> Arrow (t1, t2, aux_eff eff)
     | t -> t
   in
-  function t, e -> (aux_type (find t), aux_eff (find_e e))
+  function t, e -> (aux_type (find_t t), aux_eff (find_e e))
 
 let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
     (type_cs : typ constraints) (effect_cs : effect constraints) :
@@ -303,7 +301,7 @@ let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
   let constrain_typ tc = tcs := tc :: !tcs
   and constrain_eff ec = ecs := ec :: !ecs
   and solve_typ_constraints () =
-    List.iter union !tcs ;
+    ecs := List.fold_right union_t !tcs !ecs ;
     tcs := []
   and solve_eff_constraints () = ecs := List.fold_right union_e !ecs [] in
   let rec infer gamma theta = function
@@ -317,7 +315,7 @@ let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
     | Let (x, e, e')                 ->
         let _, (te, eff) = infer gamma theta e in
         solve_typ_constraints () ;
-        let tx = find te in
+        let tx = find_t te in
         let gamma' = (x, if find_e eff = pure then generalize gamma tx else tx) :: gamma in
         infer gamma' theta e'
     | App (e1, e2)                   ->
@@ -358,7 +356,7 @@ let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
         (gamma, (Forall (a, s, t'), pure))
     | IApp (e, a)                    -> (
         let _, (t', eff') = infer gamma theta e in
-        match (find t', signature_of_instance theta a) with
+        match (find_t t', signature_of_instance theta a) with
         | Forall (a', s', t'), s when s = s' -> (gamma, subst_instance a' a (t', eff'))
         | t', s ->
             raise
@@ -369,14 +367,14 @@ let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
   let gamma', (typ, eff) = infer gamma theta expr in
   solve_typ_constraints () ;
   solve_eff_constraints () ;
-  (gamma', (find typ, find_e eff), !tcs, !ecs)
+  (gamma', (find_t typ, find_e eff), !tcs, !ecs)
 
 let infer_type (expr : expr) : env * typ * effect =
   try
     refreshTV () ;
     refreshEV () ;
-    let gamma, (t, e), cs, ecs = infer_type_with_constraints [] [] expr [] [] in
-    (gamma, unify_types t cs, find_e e)
+    let gamma, (typ, eff), cs, ecs = infer_type_with_constraints [] [] expr [] [] in
+    (gamma, typ, eff)
   with IllTyped e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
     ([], Bad, pure)
