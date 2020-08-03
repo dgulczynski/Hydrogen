@@ -240,30 +240,50 @@ let type_of_var (gamma : env) (v : var) : typ =
   | None   -> raise (IllTyped ("Free variable " ^ v))
   | Some t -> find_t t
 
+let free_univars_of (ts : typ list) (es : effect list) =
+  let rec free_univars ts es ftv fev =
+    match (ts, es) with
+    | [], []      -> (ftv, fev)
+    | [], e :: es -> (
+      match find_e e with
+      | Flexible (_, ({contents= Free a} as ev)) -> free_univars ts es ftv (ev :: fev)
+      | _ -> free_univars ts es ftv fev )
+    | t :: ts, es ->
+    match find_t t with
+    | Arrow (t1, t2, eff)           -> free_univars (t1 :: t2 :: ts) (eff :: es) ftv fev
+    | TV ({contents= Free a} as tv) -> free_univars ts es (tv :: ftv) fev
+    | _                             -> free_univars ts es ftv fev
+  in
+  free_univars ts es [] []
+
+let free_vars_of_env (gamma : env) : typ univar ref list * effect univar ref list =
+  free_univars_of (List.map snd gamma) []
+
 let generalize (gamma : env) (t : typ) : typ =
-  let rec generalize' ftv = function
-    | Arrow (t1, t2, eff) -> Arrow (generalize' ftv t1, generalize' ftv t2, eff)
+  let generalize_e (ftv, fev) = function
+    | Flexible (_, ({contents= Free a} as ev)) as eff ->
+        if List.mem ev fev then eff else (* TODO: generalize here *) eff
+    | eff -> eff
+  in
+  let rec generalize_t (ftv, fev) = function
+    | Arrow (t1, t2, eff) ->
+        Arrow
+          (generalize_t (ftv, fev) t1, generalize_t (ftv, fev) t2, generalize_e (ftv, fev) eff)
     | TV ({contents= Free a} as tv) as t ->
-        if List.mem a ftv then t
+        if List.mem tv ftv then t
         else (
           tv := Bound (freshGV ()) ;
           t )
-    | TV {contents= Bound t} -> generalize' ftv t
+    | TV {contents= Bound t} -> generalize_t (ftv, fev) t
     | t -> t
-  and free_type_variables = function
-    | []      -> []
-    | t :: ts ->
-    match find_t t with
-    | Arrow (t1, t2, _)     -> free_type_variables (t1 :: t2 :: ts)
-    | TV {contents= Free a} -> a :: free_type_variables ts
-    | _                     -> free_type_variables ts
   and freshGV =
     let counter = ref (int_of_char 'a' - 1) in
     fun _ ->
       counter := !counter + 1 ;
       GV (Printf.sprintf "%c" (char_of_int !counter))
   in
-  generalize' (free_type_variables (List.map snd gamma)) t
+  let free_vars = free_vars_of_env gamma in
+  generalize_t free_vars (find_t t)
 
 let instantiate (t : typ) : typ =
   let rec instantiate' t instd =
@@ -293,17 +313,44 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
   in
   function t, e -> (aux_type (find_t t), aux_eff (find_e e))
 
-let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
-    (type_cs : typ constraints) (effect_cs : effect constraints) :
+let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
     env * type_effect * typ constraints * effect constraints =
-  let tcs = ref type_cs and ecs = ref effect_cs and env = ref [] in
+  let tcs = ref [] and ecs = ref [] and env = ref [] in
   let add_to_env x_t = env := x_t :: !env
   and constrain_typ tc = tcs := tc :: !tcs
   and constrain_eff ec = ecs := ec :: !ecs
-  and solve_typ_constraints () =
-    ecs := List.fold_right union_t !tcs !ecs ;
+  and solve_all_constraints () =
+    ecs := List.fold_right union_e (List.fold_right union_t !tcs !ecs) [] ;
     tcs := []
-  and solve_eff_constraints () = ecs := List.fold_right union_e !ecs [] in
+  in
+  let solve_constraints_within (t, e) =
+    (* TODO: It's hella messy now, but it works *)
+    let aux_f ev = (fun (Flexible (_, ev)) -> ev) (find_e (Flexible (empty, ev))) in
+    let aux_find = List.map aux_f in
+    solve_all_constraints () ;
+    let _, bound_es = free_vars_of_env gamma in
+    let _, evars = free_univars_of [t] [e] in
+    let free_es = List.filter (fun e -> not (List.mem e bound_es)) evars in
+    let force_union_e (ef1, ef2) ecs =
+      match (find_e ef1, find_e ef2) with
+      | ( (Flexible (is1, ({contents= Free a1} as v1)) as e1)
+        , (Flexible (is2, ({contents= Free a2} as v2)) as e2) )
+        when List.mem (aux_f v1) (aux_find free_es) || List.mem (aux_f v2) (aux_find free_es)
+        ->
+          if v1 = v2 then v2 := Bound (freshEV (diff is1 is2))
+          else v2 := Bound (Flexible (diff is1 is2, v1)) ;
+          ecs
+      | (Fixed is1 as e1), (Flexible (is2, ({contents= Free a2} as v2)) as e2)
+        when List.mem (aux_f v2) (aux_find free_es) ->
+          v2 := Bound (Fixed (diff is1 is2)) ;
+          ecs
+      | (e1, e2) as ec -> ec :: ecs
+    in
+    ecs := List.fold_right force_union_e !ecs [] ;
+    ecs := List.fold_right force_union_e !ecs [] ;
+    ecs := List.fold_right force_union_e !ecs [] ;
+    ecs := List.fold_right force_union_e !ecs []
+  in
   let rec infer gamma theta = function
     | Nil                            -> (Unit, pure)
     | I _                            -> (Int, pure)
@@ -314,10 +361,11 @@ let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
         (Arrow (tx, te, eff), pure)
     | Let (x, e, e')                 ->
         let te, eff = infer gamma theta e in
-        solve_typ_constraints () ;
+        solve_constraints_within (te, eff) ;
         let tx = find_t te in
         let x_tx = (x, if find_e eff = pure then generalize gamma tx else tx) in
         add_to_env x_tx ;
+        (* TODO: eff is missing from return! *)
         infer (x_tx :: gamma) theta e'
     | App (e1, e2)                   ->
         let t1, ef1 = infer gamma theta e1 in
@@ -347,6 +395,7 @@ let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
         let e_t, e_eff = infer gamma ((a, s) :: theta) e in
         let ret_t, ret_eff = infer ((x, e_t) :: gamma) theta ret in
         (* all a occurences should be found at this point??? *)
+        constrain_eff (e_eff, Flexible ([a], ref (Bound eff))) ;
         constrain_typ (ret_t, t) ;
         constrain_eff (ret_eff, eff) ;
         (t, eff)
@@ -365,15 +414,14 @@ let infer_type_with_constraints (gamma : env) (theta : ienv) (expr : expr)
                  ^ string_of_type_effect (t', eff') )) )
   in
   let typ, eff = infer gamma theta expr in
-  solve_typ_constraints () ;
-  solve_eff_constraints () ;
+  solve_constraints_within (typ, eff) ;
   (!env, (find_t typ, find_e eff), !tcs, !ecs)
 
 let infer_type (expr : expr) : env * typ * effect =
   try
     refreshTV () ;
     refreshEV () ;
-    let env, (typ, eff), cs, ecs = infer_type_with_constraints [] [] expr [] [] in
+    let env, (typ, eff), cs, ecs = infer_type_with_env [] [] expr in
     (env, typ, eff)
   with IllTyped e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
