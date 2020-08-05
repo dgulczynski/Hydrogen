@@ -54,3 +54,34 @@ let _ =
             , IApp (V "putx", "a") @: I 1
             , ([(Put, "v", "k", V "k" @: Nil); (Get, "()", "k", V "k" @: I 1)], "x", I 2) ) )
     ]
+
+let _ =
+  print_examples "Effect generalization?"
+    [Let ("apply", Lam ("f", Lam ("x", V "f" @: V "x")), V "apply" @: Lam ("x", V "x"))]
+
+let _ =
+  print_examples "Simple examples"
+    [ Lam ("x", V "x")
+    ; Lam ("x", V "x" @: I 2)
+    ; Lam ("y", Lam ("x", V "x") @: I 1)
+    ; Lam ("x", Lam ("y", V "x"))
+    ; Lam ("y", Lam ("x", V "y" @: V "x") @: I 1)
+    ; Lam ("x", Lam ("x", V "x") @: V "x" @: I 42)
+    ; Lam ("x", Lam ("y", Lam ("z", (V "x" @: V "z") @: V "y" @: V "z"))) ]
+
+let _ =
+  print_examples "Let bindings"
+    [ Let ("f", Lam ("x", V "x" @: I 1), Lam ("y", V "f" @: Lam ("x", V "y" @: V "x")))
+    ; Let
+        ( "g"
+        , Lam ("x", V "x" @: V "x" @: I 1)
+        , Let
+            ( "f"
+            , Lam ("x", V "x" @: I 1)
+            , Lam ("y", V "g" @: V "f" @: Lam ("x", V "y" @: V "x")) ) ) ]
+
+let _ =
+  print_examples "Parametric polymorphism"
+    [ Let ("id", Lam ("x", V "x"), V "id" @: V "id")
+    ; Lam ("x", Lam ("y", V "y") @: V "x" @: I 1)
+    ; Lam ("x", Let ("y", V "x" @: I 1, V "y")) ]
