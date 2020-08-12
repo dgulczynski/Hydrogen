@@ -35,6 +35,7 @@ type expr =
   | I      of int
   | V      of var
   | Lam    of var * expr
+  | Fun    of var * var * expr
   | Let    of var * expr * expr
   | App    of expr * expr
   | Op     of instance * op * expr
@@ -127,6 +128,7 @@ let rec string_of_expr : expr -> string =
   in
   function
   | Lam (x, e)          -> "λ" ^ x ^ ". " ^ string_of_expr e
+  | Fun (f, x, e)       -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
   | Let (x, e, e')      -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
   | App (e1, e2)        -> aux e1 ^ " " ^ aux e2
   | Op (a, op, e)       -> string_of_op op ^ "_" ^ a ^ " " ^ aux e
@@ -413,6 +415,12 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
         let tx = freshTV () in
         let te, eff = infer ((x, tx) :: gamma) theta e in
         (Arrow (tx, te, eff), pure)
+    | Fun (f, x, e)                  ->
+        let tfx = freshTV () and tx = freshTV () and f_eff = freshEV empty in
+        let tf = Arrow (tx, tfx, f_eff) in
+        let te, eff = infer ((f, tf) :: (x, tx) :: gamma) theta e in
+        constrain_typ (Arrow (tx, te, eff), tf) ;
+        (tf, pure)
     | Let (x, e, e')                 -> (
         let te, eff = infer gamma theta e in
         let te, eff = solve_constraints_within gamma (te, eff) in

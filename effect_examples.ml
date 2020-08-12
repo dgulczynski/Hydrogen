@@ -56,7 +56,7 @@ let _ =
     ]
 
 let _ =
-  print_examples "Effect generalization?"
+  print_examples "Effect generalization"
     [Let ("apply", Lam ("f", Lam ("x", V "f" @: V "x")), V "apply" @: Lam ("x", V "x"))]
 
 let _ =
@@ -79,6 +79,14 @@ let _ =
             ( "f"
             , Lam ("x", V "x" @: I 1)
             , Lam ("y", V "g" @: V "f" @: Lam ("x", V "y" @: V "x")) ) ) ]
+
+let _ =
+  print_examples "Recursive functions"
+    [ Fun ("f", "x", V "f" @: V "f" @: I 1)
+    ; Let
+        ( "fix"
+        , Fun ("fix", "f", V "f" @: V "fix" @: V "f")
+        , V "fix" @: Lam ("x", Lam ("y", Lam ("z", I 2))) ) ]
 
 let _ =
   print_examples "Parametric polymorphism"

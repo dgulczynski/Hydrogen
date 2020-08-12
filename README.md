@@ -39,6 +39,10 @@ Let bindings:
 Type / effect of let f = λx. x 1 in λy. f (λx. y x) is (Int -?ε2-> ?τ6) -?ε2-> ?τ6 / ι with env: (f : (Int -'εa-> 'τb) -'εa-> 'τb)
 Type / effect of let g = λx. x (x 1) in let f = λx. x 1 in λy. g (f (λx. y x)) is (Int -?ε8-> Int -?ε8-> Int) -?ε8-> Int / ι with env: (f : (Int -'εa-> 'τb) -'εa-> 'τb) (g : (Int -'εa-> Int) -'εa-> Int)
 
+Recursive functions:
+Type / effect of fun f x. f (f 1) is Int -> Int / ι
+Type / effect of let fix = fun fix f. f (fix f) in fix (λx. λy. λz. 2) is ?τ6 -> ?τ7 -> Int / ι with env: (fix : ('τa -'εb-> 'τa) -'εb-> 'τa)
+
 Parametric polymorphism:
 Type / effect of let id = λx. x in id id is ?τ2 -> ?τ2 / ι with env: (id : 'τa -> 'τa)
 Type / effect of λx. (λy. y) (x 1) is (Int -?ε0-> ?τ3) -?ε0-> ?τ3 / ι
