@@ -230,7 +230,7 @@ and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect con
         ecs
     | Flexible (i1, v1), (Fixed i2 as e2') -> (
       match diff i1 i2 with
-      | [] -> (Flexible ([], v1), e2') :: ecs
+      | [] -> (Flexible (empty, v1), e2') :: ecs
       | _  -> on_failed_subtyping e1' e2' )
     | Fixed i1, Fixed i2 -> (
       match diff i1 i2 with [] -> ecs | _ -> on_failed_subtyping e1' e2' )
@@ -239,14 +239,6 @@ and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect con
           (IllTyped ("Cannot unify " ^ string_of_effect e1' ^ " with " ^ string_of_effect e2'))
 
 let solve_e (ecs : effect constraints) : effect constraints = List.fold_right union_e ecs []
-
-let simplify_e (ecs : effect constraints) : unit =
-  let aux = function
-    (* | Flexible (_, v1), Flexible (_, v2) -> v1 := Bound pure ; v2 := Bound pure *)
-    | Flexible (_, v1), _ -> v1 := Bound pure
-    | _ -> ()
-  in
-  List.iter aux ecs
 
 let type_of_var (gamma : env) (v : var) : typ =
   match List.assoc_opt v gamma with
@@ -344,6 +336,59 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
   in
   function t, e -> (aux_type (find_t t), aux_eff (find_e e))
 
+let reduce (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
+    type_effect * effect constraints =
+  (* TODO: It's hella messy now, but it works *)
+  let aux_f ev =
+    (function Flexible (_, ev') -> ev' | _ -> ev) (find_e (Flexible (empty, ev)))
+  in
+  let aux_find = List.map aux_f in
+  let evars = snd (free_univars_of [typ] [eff]) in
+  let free_es =
+    let bound_es = snd (free_vars_of_env gamma) in
+    List.filter (fun e -> not (List.mem e bound_es)) evars
+  in
+  let force_union_e (ef1, ef2) (ecs, swapped) =
+    match (find_e ef1, find_e ef2) with
+    | Flexible (is1, ({contents= Free a1} as v1)), Flexible (is2, ({contents= Free a2} as v2))
+      when List.mem (aux_f v1) (aux_find free_es) || List.mem (aux_f v2) (aux_find free_es) ->
+        if v1 = v2 then v2 := Bound (freshEV (diff is1 is2))
+        else v2 := Bound (Flexible (diff is1 is2, v1)) ;
+        (ecs, true)
+    | Fixed is1, Flexible (is2, ({contents= Free a2} as v2)) when List.mem (aux_f v2) free_es
+      ->
+        v2 := Bound (Fixed (diff is1 is2)) ;
+        (ecs, true)
+    | (e1, e2) as ec when e1 != e2 -> (ec :: ecs, swapped)
+    | _ -> (ecs, swapped)
+  in
+  let rec solve_in_loop ecs =
+    match List.fold_right force_union_e ecs ([], false) with
+    | ecs', false -> ecs'
+    | ecs', true  -> solve_in_loop ecs'
+  in
+  let ecs = solve_in_loop ecs in
+  let bound_es = snd (free_vars_of_env gamma) in
+  let expand e evs =
+    match find_e e with
+    | Flexible (_, ev) when not (List.mem ev bound_es) -> merge [ev] evs
+    | _ -> evs
+  in
+  let rec collect = function
+    | Arrow (t1, t2, eff) ->
+        let contra1, co1 = collect t1 in
+        let contra2, co2 = collect t2 in
+        (merge co1 contra2, expand eff (merge contra1 co2))
+    | Forall (_, _, t)    -> collect t
+    | _                   -> ([], [])
+  in
+  let typ, eff = (find_t typ, find_e eff) in
+  let contravars, covars = collect typ in
+  let covars = expand eff covars in
+  let covars' = diff covars contravars in
+  List.iter (fun ev -> ev := Bound pure) covars' ;
+  ((find_t typ, find_e eff), ecs)
+
 let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
     env * type_effect * typ constraints * effect constraints =
   let tcs = ref [] and ecs = ref [] and env = ref [] in
@@ -354,39 +399,11 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
     ecs := List.fold_right union_e (List.fold_right union_t !tcs !ecs) [] ;
     tcs := []
   in
-  let solve_constraints_within (t, e) =
-    (* TODO: It's hella messy now, but it works *)
-    let aux_f ev =
-      (function Flexible (_, ev') -> ev' | _ -> ev) (find_e (Flexible (empty, ev)))
-    in
-    let aux_find = List.map aux_f in
+  let solve_constraints_within gamma (t, e) =
     solve_all_constraints () ;
-    let evars = snd (free_univars_of [t] [e]) in
-    let free_es =
-      let bound_es = snd (free_vars_of_env gamma) in
-      List.filter (fun e -> not (List.mem e bound_es)) evars
-    in
-    let force_union_e (ef1, ef2) (ecs, swapped) =
-      match (find_e ef1, find_e ef2) with
-      | ( Flexible (is1, ({contents= Free a1} as v1))
-        , Flexible (is2, ({contents= Free a2} as v2)) )
-        when List.mem (aux_f v1) (aux_find free_es) || List.mem (aux_f v2) (aux_find free_es)
-        ->
-          if v1 = v2 then v2 := Bound (freshEV (diff is1 is2))
-          else v2 := Bound (Flexible (diff is1 is2, v1)) ;
-          (ecs, true)
-      | Fixed is1, Flexible (is2, ({contents= Free a2} as v2))
-        when List.mem (aux_f v2) free_es ->
-          v2 := Bound (Fixed (diff is1 is2)) ;
-          (ecs, true)
-      | (e1, e2) as ec -> (ec :: ecs, swapped)
-    in
-    let rec solve_in_loop ecs =
-      match List.fold_right force_union_e ecs ([], false) with
-      | ecs', false -> ecs'
-      | ecs', true  -> solve_in_loop ecs'
-    in
-    ecs := solve_in_loop !ecs
+    let t_e, ecs' = reduce gamma (t, e) !ecs in
+    ecs := ecs' ;
+    t_e
   in
   let rec infer gamma theta = function
     | Nil                            -> (Unit, pure)
@@ -398,7 +415,7 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
         (Arrow (tx, te, eff), pure)
     | Let (x, e, e')                 -> (
         let te, eff = infer gamma theta e in
-        solve_constraints_within (te, eff) ;
+        let te, eff = solve_constraints_within gamma (te, eff) in
         let tx = find_t te in
         match find_e eff with
         | Fixed [] ->
@@ -459,7 +476,7 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
                  ^ string_of_type_effect (t', eff') )) )
   in
   let typ, eff = infer gamma theta expr in
-  solve_constraints_within (typ, eff) ;
+  let typ, eff = solve_constraints_within gamma (typ, eff) in
   (!env, (find_t typ, find_e eff), !tcs, !ecs)
 
 let infer_type (expr : expr) : env * typ * effect =
