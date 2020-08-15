@@ -53,6 +53,8 @@ type env = typ environment
 
 type ienv = signature environment
 
+type variance = Covariant | Contravariant | Invariant
+
 exception IllTyped of string
 
 let empty : 'a set = []
@@ -90,9 +92,7 @@ let rec string_of_type : typ -> string = function
   | Unit                   -> "Unit"
   | Int                    -> "Int"
   | Arrow (t1, t2, eff)    ->
-      ( match t1 with
-      | Arrow _ -> "(" ^ string_of_type t1 ^ ") "
-      | _       -> string_of_type t1 ^ " " )
+      (match t1 with Arrow _ -> "(" ^ string_of_type t1 ^ ") " | _ -> string_of_type t1 ^ " ")
       ^ (match find_e eff with Fixed [] -> "" | eff' -> "-" ^ string_of_effect eff')
       ^ "-> " ^ string_of_type t2
   | TV {contents= Free a}  -> a
@@ -247,25 +247,39 @@ let type_of_var (gamma : env) (v : var) : typ =
   | None   -> raise (IllTyped ("Free variable " ^ v))
   | Some t -> find_t t
 
-let free_univars_of (ts : typ list) (es : effect list) =
-  let rec free_univars ts es ftv fev =
-    match (ts, es) with
-    | [], []      -> (ftv, fev)
-    | [], e :: es -> (
-      match find_e e with
-      | Flexible (_, ({contents= Free a} as ev)) -> free_univars ts es ftv (ev :: fev)
-      | _ -> free_univars ts es ftv fev )
-    | t :: ts, es ->
+let free_univars_of (ignore_ts : typ univar ref list) (ignore_es : effect univar ref list)
+    (ts : typ list) (es : effect list) :
+    typ univar ref list * (effect univar ref * variance) list =
+  let expand e evs = match find_e e with Flexible (_, ev) -> merge [ev] evs | _ -> evs in
+  let rec collect t =
     match find_t t with
-    | Arrow (t1, t2, eff)           -> free_univars (t1 :: t2 :: ts) (eff :: es) ftv fev
-    | TV ({contents= Free a} as tv) -> free_univars ts es (tv :: ftv) fev
-    | Forall (a, s, t')             -> free_univars (t' :: ts) es ftv fev
-    | _                             -> free_univars ts es ftv fev
+    | TV ({contents= Free a} as tv) when not (List.mem tv ignore_ts) -> ([tv], [], [])
+    | Arrow (t1, t2, eff) ->
+        let tvars1, contra1, co1 = collect t1 in
+        let tvars2, contra2, co2 = collect t2 in
+        (merge tvars1 tvars2, merge co1 contra2, expand eff (merge contra1 co2))
+    | Forall (_, _, t) -> collect t
+    | _ -> ([], [], [])
   in
-  free_univars ts es [] []
+  let tvars, contra, co =
+    List.fold_right
+      (fun t (ts, contra, co) ->
+        let ts', contra', co' = collect t in
+        (merge ts' ts, merge contra' contra, merge co' co))
+      ts ([], [], [])
+  in
+  let co = List.fold_right expand es co in
+  let contra' = diff contra co and co' = diff co contra in
+  let inv = diff contra contra' in
+  ( tvars
+  , merge
+      (List.map (fun e -> (e, Covariant)) co')
+      (merge
+         (List.map (fun e -> (e, Invariant)) inv)
+         (List.map (fun e -> (e, Contravariant)) contra')) )
 
-let free_vars_of_env (gamma : env) : typ univar ref list * effect univar ref list =
-  free_univars_of (List.map snd gamma) []
+let free_vars_of_env (gamma : env) : typ univar ref list * (effect univar ref * variance) list =
+  free_univars_of [] [] (List.map snd gamma) []
 
 let generalize (gamma : env) (t : typ) : typ =
   let freshGT, freshGE =
@@ -278,7 +292,7 @@ let generalize (gamma : env) (t : typ) : typ =
   in
   let generalize_e (ftv, fev) = function
     | Flexible (is, ({contents= Free a} as ev)) as eff ->
-        if List.mem ev fev then eff
+        if List.assoc_opt ev fev != None then eff
         else (
           ev := Bound (freshGE is) ;
           eff )
@@ -340,25 +354,24 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
 
 let reduce (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
     type_effect * effect constraints =
-  (* TODO: It's hella messy now, but it works *)
-  let aux_f ev =
-    (function Flexible (_, ev') -> ev' | _ -> ev) (find_e (Flexible (empty, ev)))
+  (* TODO: It it is even more messy now, but it still works *)
+  let aux_f (ev, v) =
+    match find_e (Flexible (empty, ev)) with Flexible (_, ev') -> (ev', v) | _ -> (ev, v)
   in
   let aux_find = List.map aux_f in
-  let evars = snd (free_univars_of [typ] [eff]) in
-  let free_es =
-    let bound_es = snd (free_vars_of_env gamma) in
-    List.filter (fun e -> not (List.mem e bound_es)) evars
-  in
+  let bound_es = List.map fst (snd (free_vars_of_env gamma)) in
+  let evars = snd (free_univars_of [] bound_es [typ] [eff]) in
+  let free_es = List.filter (fun (e, _) -> not (List.mem e bound_es)) evars in
   let force_union_e (ef1, ef2) (ecs, swapped) =
     match (find_e ef1, find_e ef2) with
     | Flexible (is1, ({contents= Free a1} as v1)), Flexible (is2, ({contents= Free a2} as v2))
-      when List.mem (aux_f v1) (aux_find free_es) || List.mem (aux_f v2) (aux_find free_es) ->
+      when List.assoc_opt v1 (aux_find free_es) != None
+           || List.assoc_opt v2 (aux_find free_es) != None ->
         if v1 = v2 then v2 := Bound (freshEV (diff is1 is2))
         else v2 := Bound (Flexible (diff is1 is2, v1)) ;
         (ecs, true)
-    | Fixed is1, Flexible (is2, ({contents= Free a2} as v2)) when List.mem (aux_f v2) free_es
-      ->
+    | Fixed is1, Flexible (is2, ({contents= Free a2} as v2))
+      when List.assoc_opt v2 (aux_find free_es) != None ->
         v2 := Bound (Fixed (diff is1 is2)) ;
         (ecs, true)
     | (e1, e2) as ec when e1 != e2 -> (ec :: ecs, swapped)
@@ -370,7 +383,6 @@ let reduce (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
     | ecs', true  -> solve_in_loop ecs'
   in
   let ecs = solve_in_loop ecs in
-  let bound_es = snd (free_vars_of_env gamma) in
   let expand e evs =
     match find_e e with
     | Flexible (_, ev) when not (List.mem ev bound_es) -> merge [ev] evs
