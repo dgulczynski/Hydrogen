@@ -53,7 +53,7 @@ type env = typ environment
 
 type ienv = signature environment
 
-type variance = Covariant | Contravariant | Invariant
+type variance = Covariant | Invariant | Contravariant
 
 exception IllTyped of string
 
@@ -88,11 +88,21 @@ let rec find_e : effect -> effect = function
     | e                  -> e )
   | e -> e
 
+let rec find_t : typ -> typ = function
+  | Arrow (t1, t2, eff)            -> Arrow (find_t t1, find_t t2, find_e eff)
+  | TV ({contents= Bound t} as tv) ->
+      let t' = find_t t in
+      tv := Bound t' ;
+      t'
+  | t                              -> t
+
 let rec string_of_type : typ -> string = function
   | Unit                   -> "Unit"
   | Int                    -> "Int"
   | Arrow (t1, t2, eff)    ->
-      (match t1 with Arrow _ -> "(" ^ string_of_type t1 ^ ") " | _ -> string_of_type t1 ^ " ")
+      ( match find_t t1 with
+      | Arrow _ -> "(" ^ string_of_type t1 ^ ") "
+      | _       -> string_of_type t1 ^ " " )
       ^ (match find_e eff with Fixed [] -> "" | eff' -> "-" ^ string_of_effect eff')
       ^ "-> " ^ string_of_type t2
   | TV {contents= Free a}  -> a
@@ -189,14 +199,6 @@ let rec occurs (x : identifier) : typ -> bool = function
   | TV {contents= Free a} -> x = a
   | _                     -> false
 
-let rec find_t : typ -> typ = function
-  | Arrow (t1, t2, eff)            -> Arrow (find_t t1, find_t t2, find_e eff)
-  | TV ({contents= Bound t} as tv) ->
-      let t' = find_t t in
-      tv := Bound t' ;
-      t'
-  | t                              -> t
-
 let rec union_t ((t1, t2) : typ * typ) (ecs : effect constraints) : effect constraints =
   match (find_t t1, find_t t2) with
   | t1', t2' when t1' = t2' -> ecs
@@ -227,9 +229,6 @@ and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect con
     | Flexible (i1, v1), (Flexible (i2, v2) as e2') ->
         expand v2 (diff i1 i2) ;
         if v1 = v2 then ecs else (Flexible (empty, v1), e2') :: ecs
-    | Flexible (i1, v1), Fixed [] ->
-        v1 := Bound pure ;
-        ecs
     | Flexible (i1, v1), (Fixed i2 as e2') -> (
       match diff i1 i2 with
       | [] -> (Flexible (empty, v1), e2') :: ecs
@@ -246,6 +245,18 @@ let type_of_var (gamma : env) (v : var) : typ =
   match List.assoc_opt v gamma with
   | None   -> raise (IllTyped ("Free variable " ^ v))
   | Some t -> find_t t
+
+let mix_variance (v1 : variance) (v2 : variance) : variance =
+  if v1 = v2 then v1 else Invariant
+
+let rec merge_variance_list xs ys =
+  match (xs, ys) with
+  | [], ys -> ys
+  | xs, [] -> xs
+  | ((x, vx) :: xs' as xs), ((y, vy) :: ys' as ys) ->
+      if x < y then (x, vx) :: merge xs' ys
+      else if x = y then (x, mix_variance vx vy) :: merge_variance_list xs' ys'
+      else (y, vy) :: merge_variance_list xs ys'
 
 let free_univars_of (ignore_ts : typ univar ref list) (ignore_es : effect univar ref list)
     (ts : typ list) (es : effect list) :
@@ -266,19 +277,20 @@ let free_univars_of (ignore_ts : typ univar ref list) (ignore_es : effect univar
       (fun t (ts, contra, co) ->
         let ts', contra', co' = collect t in
         (merge ts' ts, merge contra' contra, merge co' co))
-      ts ([], [], [])
+      ts
+      ([], [], List.fold_right expand es [])
   in
-  let co = List.fold_right expand es co in
   let contra' = diff contra co and co' = diff co contra in
-  let inv = diff contra contra' in
+  let inv' = diff contra contra' in
   ( tvars
-  , merge
+  , merge_variance_list
       (List.map (fun e -> (e, Covariant)) co')
-      (merge
-         (List.map (fun e -> (e, Invariant)) inv)
+      (merge_variance_list
+         (List.map (fun e -> (e, Invariant)) inv')
          (List.map (fun e -> (e, Contravariant)) contra')) )
 
-let free_vars_of_env (gamma : env) : typ univar ref list * (effect univar ref * variance) list =
+let free_vars_of_env (gamma : env) : typ univar ref list * (effect univar ref * variance) list
+    =
   free_univars_of [] [] (List.map snd gamma) []
 
 let generalize (gamma : env) (t : typ) : typ =
@@ -354,53 +366,88 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
 
 let reduce (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
     type_effect * effect constraints =
-  (* TODO: It it is even more messy now, but it still works *)
-  let aux_f (ev, v) =
-    match find_e (Flexible (empty, ev)) with Flexible (_, ev') -> (ev', v) | _ -> (ev, v)
+  (* TODO: Is it less messy now? *)
+  let rec find_ev ev =
+    match ev with
+    | {contents= Free _} -> Some ev
+    | {contents= Bound (Flexible (_, ev'))} -> find_ev ev'
+    | {contents= Bound e} -> None
   in
-  let aux_find = List.map aux_f in
-  let bound_es = List.map fst (snd (free_vars_of_env gamma)) in
-  let evars = snd (free_univars_of [] bound_es [typ] [eff]) in
-  let free_es = List.filter (fun (e, _) -> not (List.mem e bound_es)) evars in
-  let force_union_e (ef1, ef2) (ecs, swapped) =
+  let refresh_es evs = List.sort_uniq compare (List.filter_map find_ev evs) in
+  let refresh_evs evs =
+    let rec aux = function
+      | (x, vx) :: ((y, vy) :: ys' as ys) ->
+          if x != y then (x, vx) :: aux ys else aux ((x, mix_variance vx vy) :: ys')
+      | xs -> xs
+    in
+    aux
+      (List.sort_uniq compare
+         (List.filter_map
+            (fun (e, v) -> match find_ev e with Some e' -> Some (e', v) | None -> None)
+            evs))
+  in
+  let update_ev e v evs =
+    match find_ev e with
+    | None   -> refresh_evs evs
+    | Some e ->
+        let aux (e', v') =
+          match find_ev e' with
+          | Some e' when e' = e -> Some (e', mix_variance v v')
+          | Some e' -> Some (e', v')
+          | None -> None
+        in
+        refresh_evs (List.filter_map aux evs)
+  in
+  let force_union_e (ecs, free_es, variance, swapped) (ef1, ef2) =
     match (find_e ef1, find_e ef2) with
-    | Flexible (is1, ({contents= Free a1} as v1)), Flexible (is2, ({contents= Free a2} as v2))
-      when List.assoc_opt v1 (aux_find free_es) != None
-           || List.assoc_opt v2 (aux_find free_es) != None ->
-        if v1 = v2 then v2 := Bound (freshEV (diff is1 is2))
-        else v2 := Bound (Flexible (diff is1 is2, v1)) ;
-        (ecs, true)
-    | Fixed is1, Flexible (is2, ({contents= Free a2} as v2))
-      when List.assoc_opt v2 (aux_find free_es) != None ->
-        v2 := Bound (Fixed (diff is1 is2)) ;
-        (ecs, true)
-    | (e1, e2) as ec when e1 != e2 -> (ec :: ecs, swapped)
-    | _ -> (ecs, swapped)
+    | Flexible (is1, ev1), Flexible (is2, ev2) when ev1 = ev2 ->
+        ev1 := Bound (freshEV (diff is1 is2)) ;
+        (ecs, refresh_es free_es, refresh_evs variance, true)
+    | ( Flexible (is1, ({contents= Free a1} as ev1))
+      , (Flexible (is2, ({contents= Free a2} as ev2)) as e2) )
+      when List.mem ev1 free_es || List.mem ev2 free_es ->
+        let variance' =
+          match (List.assoc_opt ev1 variance, List.assoc_opt ev2 variance) with
+          | None, _ | _, None ->
+              ev1 := Bound e2 ;
+              variance
+          | Some v, Some Invariant | Some Invariant, Some v ->
+              ev1 := Bound e2 ;
+              (* print_string (a1 ^ " is invariant what now???\n") ; *)
+              update_ev ev1 (mix_variance Invariant v) variance
+          | Some v1, Some v2 ->
+              ev1 := Bound e2 ;
+              update_ev ev1 (mix_variance v1 v2) variance
+        in
+        (ecs, refresh_es free_es, refresh_evs variance', true)
+    | Flexible (is1, ({contents= Free a1} as ev1)), (Fixed is2 as e2)
+      when List.mem ev1 free_es ->
+        ( match List.assoc ev1 variance with
+        | Covariant -> ev1 := Bound pure
+        | Invariant -> ev1 := Bound e2
+        (* print_string (a1 ^ " is invariant what now???\n") *)
+        | Contravariant -> ev1 := Bound e2 ) ;
+        (ecs, refresh_es free_es, refresh_evs variance, true)
+    | (e1, e2) as ec when e1 != e2 -> (ec :: ecs, free_es, variance, swapped)
+    | _ -> (ecs, free_es, variance, swapped)
   in
-  let rec solve_in_loop ecs =
-    match List.fold_right force_union_e ecs ([], false) with
-    | ecs', false -> ecs'
-    | ecs', true  -> solve_in_loop ecs'
+  let rec solve_in_loop ecs free_es variance =
+    match List.fold_left force_union_e ([], free_es, variance, false) ecs with
+    | ecs', free_es', variance', false -> (ecs', free_es', variance')
+    | ecs', free_es', bound_es', true -> solve_in_loop ecs' free_es' bound_es'
   in
-  let ecs = solve_in_loop ecs in
-  let expand e evs =
-    match find_e e with
-    | Flexible (_, ev) when not (List.mem ev bound_es) -> merge [ev] evs
-    | _ -> evs
+  let bound_es = refresh_evs (snd (free_vars_of_env gamma)) in
+  let free_es = refresh_evs (snd (free_univars_of [] (List.map fst bound_es) [typ] [eff])) in
+  let ecs, free_es, variance =
+    solve_in_loop ecs (List.map fst free_es)
+      (refresh_evs (merge_variance_list free_es bound_es))
   in
-  let rec collect = function
-    | Arrow (t1, t2, eff) ->
-        let contra1, co1 = collect t1 in
-        let contra2, co2 = collect t2 in
-        (merge co1 contra2, expand eff (merge contra1 co2))
-    | Forall (_, _, t)    -> collect t
-    | _                   -> ([], [])
-  in
-  let typ, eff = (find_t typ, find_e eff) in
-  let contravars, covars = collect typ in
-  let covars = expand eff covars in
-  let covars' = diff covars contravars in
-  List.iter (fun ev -> ev := Bound pure) covars' ;
+  List.iter
+    (fun ev ->
+      match List.assoc_opt ev (refresh_evs variance) with
+      | Some Covariant -> ev := Bound pure
+      | _              -> ())
+    (diff (refresh_es free_es) (refresh_es (List.map fst bound_es))) ;
   ((find_t typ, find_e eff), ecs)
 
 let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
@@ -495,8 +542,7 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
                  ( "Instance " ^ a ^ ":" ^ string_of_signature s ^ " application to "
                  ^ string_of_type_effect (t', eff') )) )
   in
-  let typ, eff = infer gamma theta expr in
-  let typ, eff = solve_constraints_within gamma (typ, eff) in
+  let typ, eff = solve_constraints_within gamma (infer gamma theta expr) in
   (!env, (find_t typ, find_e eff), !tcs, !ecs)
 
 let infer_type (expr : expr) : env * typ * effect =
