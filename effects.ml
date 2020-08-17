@@ -199,11 +199,15 @@ let rec occurs (x : identifier) : typ -> bool = function
   | TV {contents= Free a} -> x = a
   | _                     -> false
 
+let expand (v : effect univar ref) : instance set -> unit = function
+  | [] -> ()
+  | is -> v := Bound (freshEV is)
+
 let rec union_t ((t1, t2) : typ * typ) (ecs : effect constraints) : effect constraints =
   match (find_t t1, find_t t2) with
   | t1', t2' when t1' = t2' -> ecs
   | Arrow (a1, b1, e1), Arrow (a2, b2, e2) ->
-      union_t (b1, b2) (union_e (e1, e2) (union_t (a1, a2) ecs))
+      union_t (a2, a1) (union_e (e1, e2) (union_t (b1, b2) ecs))
   | TV {contents= Bound t}, t' | t', TV {contents= Bound t} -> union_t (t, t') ecs
   | TV ({contents= Free a} as tv), t' | t', TV ({contents= Free a} as tv) ->
       if occurs a t' then
@@ -214,7 +218,6 @@ let rec union_t ((t1, t2) : typ * typ) (ecs : effect constraints) : effect const
       raise (IllTyped ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
 
 and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect constraints =
-  let expand v = function [] -> () | is -> v := Bound (freshEV is) in
   let on_failed_subtyping e1 e2 =
     raise
       (IllTyped ("Effect " ^ string_of_effect e1 ^ " does not subtype " ^ string_of_effect e2))
@@ -401,32 +404,29 @@ let reduce (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
   let force_union_e (ecs, free_es, variance, swapped) (ef1, ef2) =
     match (find_e ef1, find_e ef2) with
     | Flexible (is1, ev1), Flexible (is2, ev2) when ev1 = ev2 ->
-        ev1 := Bound (freshEV (diff is1 is2)) ;
+        expand ev2 (diff is1 is2) ;
         (ecs, refresh_es free_es, refresh_evs variance, true)
     | ( Flexible (is1, ({contents= Free a1} as ev1))
       , (Flexible (is2, ({contents= Free a2} as ev2)) as e2) )
       when List.mem ev1 free_es || List.mem ev2 free_es ->
+        expand ev2 (diff is1 is2) ;
         let variance' =
           match (List.assoc_opt ev1 variance, List.assoc_opt ev2 variance) with
-          | None, _ | _, None ->
-              ev1 := Bound e2 ;
-              variance
+          | Some Covariant, _ -> variance
+          | None, _ | _, None -> variance
           | Some v, Some Invariant | Some Invariant, Some v ->
-              ev1 := Bound e2 ;
-              (* print_string (a1 ^ " is invariant what now???\n") ; *)
-              update_ev ev1 (mix_variance Invariant v) variance
-          | Some v1, Some v2 ->
-              ev1 := Bound e2 ;
-              update_ev ev1 (mix_variance v1 v2) variance
+              update_ev ev1 Invariant variance
+          | Some v1, Some v2 -> update_ev ev1 (mix_variance v1 v2) variance
         in
+        ev1 := Bound e2 ;
         (ecs, refresh_es free_es, refresh_evs variance', true)
-    | Flexible (is1, ({contents= Free a1} as ev1)), (Fixed is2 as e2)
-      when List.mem ev1 free_es ->
+    | Flexible (is1, ({contents= Free a1} as ev1)), Fixed is2 when List.mem ev1 free_es ->
         ( match List.assoc ev1 variance with
-        | Covariant -> ev1 := Bound pure
-        | Invariant -> ev1 := Bound e2
-        (* print_string (a1 ^ " is invariant what now???\n") *)
-        | Contravariant -> ev1 := Bound e2 ) ;
+        | Covariant     -> ev1 := Bound pure
+        | Invariant     ->
+            (* print_string (a1 ^ " is invariant what now???\n") *)
+            ev1 := Bound (Fixed (diff is2 is1))
+        | Contravariant -> ev1 := Bound (Fixed (diff is2 is1)) ) ;
         (ecs, refresh_es free_es, refresh_evs variance, true)
     | (e1, e2) as ec when e1 != e2 -> (ec :: ecs, free_es, variance, swapped)
     | _ -> (ecs, free_es, variance, swapped)

@@ -24,7 +24,7 @@ Instance application:
 Type / effect of let putx = λs:State(Int). λx. put_s x in handle_a:State(Int) (putx<a>) 1 {put v k. k () | get () k. k 1 | return x. 2} is Int / ι with env: (putx : ∀s:State(Int). Int -{s}-> Unit)
 
 Effect generalization:
-Type / effect of let apply = λf. λx. f x in apply (λx. x) is ?τ5 -> ?τ5 / ι with env: (apply : ('τa -'εb-> 'τc) -> 'τa -'εb-> 'τc)
+Type / effect of let apply = λf. λx. f x in apply (λx. x) is ?τ4 -> ?τ4 / ι with env: (apply : ('τa -'εb-> 'τc) -> 'τa -'εb-> 'τc)
 
 Simple examples:
 Type / effect of λx. x is ?τ0 -> ?τ0 / ι
@@ -37,7 +37,7 @@ Type / effect of λx. λy. λz. (x z) (y z) is (?τ2 -?ε5-> ?τ4 -?ε5-> ?τ5) 
 
 Let bindings:
 Type / effect of let f = λx. x 1 in λy. f (λx. y x) is (Int -?ε6-> ?τ6) -?ε6-> ?τ6 / ι with env: (f : (Int -'εa-> 'τb) -'εa-> 'τb)
-Type / effect of let g = λx. x (x 1) in let f = λx. x 1 in λy. g (f (λx. y x)) is (Int -?ε14-> Int -?ε14-> Int) -?ε14-> Int / ι with env: (f : (Int -'εa-> 'τb) -'εa-> 'τb) (g : (Int -'εa-> Int) -'εa-> Int)
+Type / effect of let g = λx. x (x 1) in let f = λx. x 1 in λy. g (f (λx. y x)) is (Int -?ε13-> Int -?ε13-> Int) -?ε13-> Int / ι with env: (f : (Int -'εa-> 'τb) -'εa-> 'τb) (g : (Int -'εa-> Int) -'εa-> Int)
 
 Recursive functions:
 Type / effect of fun f x. f (f 1) is Int -> Int / ι
