@@ -47,4 +47,7 @@ Parametric polymorphism:
 Type / effect of let id = λx. x in id id is ?τ2 -> ?τ2 / ι with env: (id : 'τa -> 'τa)
 Type / effect of λx. (λy. y) (x 1) is (Int -?ε0-> ?τ3) -?ε0-> ?τ3 / ι
 Type / effect of λx. let y = x 1 in y is (Int -?ε0-> ?τ1) -?ε0-> ?τ1 / ι with env: (y : ?τ1)
+
+Unnamed handlers:
+Type / effect of handle_State(Int) put 21 {put v k. k () | get () k. k 37 | return x. x} is Unit / ι
 ```

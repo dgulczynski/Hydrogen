@@ -32,16 +32,18 @@ type type_effect = typ * effect
 
 type expr =
   | Nil
-  | I      of int
-  | V      of var
-  | Lam    of var * expr
-  | Fun    of var * var * expr
-  | Let    of var * expr * expr
-  | App    of expr * expr
-  | Op     of instance * op * expr
-  | Handle of instance * signature * expr * handler
-  | ILam   of instance * signature * expr
-  | IApp   of expr * instance
+  | I       of int
+  | V       of var
+  | Lam     of var * expr
+  | Fun     of var * var * expr
+  | Let     of var * expr * expr
+  | App     of expr * expr
+  | Op      of instance * op * expr
+  | Handle  of instance * signature * expr * handler
+  | ILam    of instance * signature * expr
+  | IApp    of expr * instance
+  | UHandle of signature * expr * handler
+  | UOp     of op * expr
 
 and op = Raise | Get | Put
 
@@ -137,6 +139,9 @@ let rec string_of_expr : expr -> string =
       ^ string_of_handler h
   | ILam (a, s, e)      -> "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
   | IApp (e, a)         -> aux e ^ "<" ^ a ^ ">"
+  | UOp (op, e)         -> string_of_op op ^ " " ^ aux e
+  | UHandle (s, e, h)   ->
+      "handle_" ^ string_of_signature s ^ " " ^ string_of_expr e ^ " " ^ string_of_handler h
   | e'                  -> aux e'
 
 and string_of_handler : handler -> string = function
@@ -338,6 +343,17 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
   in
   function t, e -> (aux_type (find_t t), aux_eff (find_e e))
 
+(* Give name to all occurences of anonymous operators *)
+let rec name_unnamed (a : instance) : expr -> expr = function
+  | Lam (x, e)      -> Lam (x, name_unnamed a e)
+  | Fun (f, x, e)   -> Fun (f, x, name_unnamed a e)
+  | Let (x, e, e')  -> Let (x, name_unnamed a e, name_unnamed a e')
+  | App (e1, e2)    -> App (name_unnamed a e1, name_unnamed a e2)
+  | Op _ | Handle _ -> raise (IllTyped "Named and unnamed handlers combined")
+  | UOp (op, e)     -> Op (a, op, e)
+  | UHandle _       -> raise (IllTyped "Unnamed handler inside another")
+  | e               -> e
+
 let reduce (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
     type_effect * effect constraints =
   (* TODO: It's hella messy now, but it works *)
@@ -482,6 +498,12 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
               (IllTyped
                  ( "Instance " ^ a ^ ":" ^ string_of_signature s ^ " application to "
                  ^ string_of_type_effect (t', eff') )) )
+    | UOp (op, _)                    ->
+        raise
+          (IllTyped ("Operator " ^ string_of_op op ^ " used without corresponding handler"))
+    | UHandle (s, e, h)              ->
+        let a = "?unnamed" in
+        infer gamma theta (Handle (a, s, name_unnamed a e, h))
   in
   let typ, eff = infer gamma theta expr in
   let typ, eff = solve_constraints_within gamma (typ, eff) in

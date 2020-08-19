@@ -1,3 +1,4 @@
+;;
 #use "hydrogen.ml"
 
 let print_inferred_type (expr : expr) : unit =
