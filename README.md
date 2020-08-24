@@ -15,13 +15,13 @@ Simply running `ocaml effect_examples.ml` should result in output like:
 ```
 Simple effects:
 Type / effect of λe:Error. λx. raise_e x is ∀e:Error. Unit -{e}-> ?τ1 / ι
-Type / effect of handle_a:State(Int) put_a 21 {put v k. k () | get () k. k 37 | return x. x} is Unit / ι
+Type / effect of handle put 21 {put v k. k () | get () k. k 37 | return x. x} is Unit / ι
 
 Nested effects:
-Type / effect of λy. handle_a:State(Int) handle_b:State(Int -> Int) put_a ((get_b ()) y) {get () k. k (λx. x) | return x. x} {put v k. k () | return x. x} is Int -> Unit / ι
+Type / effect of λy. handle_a handle_b put_a ((get_b ()) y) {get () k. k (λx. x) | put v k. k () | return x. x} {get () k. k 42 | put v k. k () | return x. x} is Int -> Unit / ι
 
 Instance application:
-Type / effect of let putx = λs:State(Int). λx. put_s x in handle_a:State(Int) (putx<a>) 1 {put v k. k () | get () k. k 1 | return x. 2} is Int / ι with env: (putx : ∀s:State(Int). Int -{s}-> Unit)
+Type / effect of let putx = λs:State Int. λx. put_s x in handle_a (putx<a>) 1 {put v k. k () | get () k. k 1 | return x. 2} is Int / ι with env: (putx : ∀s:State Int. Int -{s}-> Unit)
 
 Effect generalization:
 Type / effect of let apply = λf. λx. f x in apply (λx. x) is ?τ5 -> ?τ5 / ι with env: (apply : ('τa -'εb-> 'τc) -> 'τa -'εb-> 'τc)
@@ -48,6 +48,12 @@ Type / effect of let id = λx. x in id id is ?τ2 -> ?τ2 / ι with env: (id : '
 Type / effect of λx. (λy. y) (x 1) is (Int -?ε0-> ?τ3) -?ε0-> ?τ3 / ι
 Type / effect of λx. let y = x 1 in y is (Int -?ε0-> ?τ1) -?ε0-> ?τ1 / ι with env: (y : ?τ1)
 
-Unnamed handlers:
-Type / effect of handle_State(Int) put 21 {put v k. k () | get () k. k 37 | return x. x} is Unit / ι
+Ill-typed examples:
+Type inference error: The type variable ?τ0 occurs inside ?τ0 -?ε0-> ?τ1
+Type / effect of λx. x x is ILL-TYPED / ι
+Type inference error: Instance (e : Error) application to (λx. x : ?τ0 -> ?τ0 / ι) which does not reduce to instance lambda
+Type / effect of λe:Error. (λx. x)<e> is ILL-TYPED / ι
+Type inference error: Nested unnamed handlers
+Type / effect of handle handle put ((get ()) y) {get () k. k (λx. x) | return x. x} {put v k. k () | return x. x} is ILL-TYPED / ι
+
 ```

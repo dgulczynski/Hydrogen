@@ -23,10 +23,8 @@ let ( ->: ) t1 t2 eff = Arrow (t1, t2, eff)
 let _ =
   print_examples "Simple effects"
     [ ILam ("e", Error, Lam ("x", Op ("e", Raise, V "x")))
-    ; Handle
-        ( "a"
-        , State Int
-        , Op ("a", Put, I 21)
+    ; UHandle
+        ( UOp (Put, I 21)
         , ([(Put, "v", "k", V "k" @: Nil); (Get, "()", "k", V "k" @: I 37)], "x", V "x") ) ]
 
 let _ =
@@ -35,13 +33,15 @@ let _ =
         ( "y"
         , Handle
             ( "a"
-            , State Int
             , Handle
                 ( "b"
-                , State ((Int ->: Int) pure)
                 , Op ("a", Put, Op ("b", Get, Nil) @: V "y")
-                , ([(Get, "()", "k", V "k" @: Lam ("x", V "x"))], "x", V "x") )
-            , ([(Put, "v", "k", V "k" @: Nil)], "x", V "x") ) ) ]
+                , ( [ (Get, "()", "k", V "k" @: Lam ("x", V "x"))
+                    ; (Put, "v", "k", V "k" @: Nil) ]
+                  , "x"
+                  , V "x" ) )
+            , ([(Get, "()", "k", V "k" @: I 42); (Put, "v", "k", V "k" @: Nil)], "x", V "x")
+            ) ) ]
 
 let _ =
   print_examples "Instance application"
@@ -50,7 +50,6 @@ let _ =
         , ILam ("s", State Int, Lam ("x", Op ("s", Put, V "x")))
         , Handle
             ( "a"
-            , State Int
             , IApp (V "putx", "a") @: I 1
             , ([(Put, "v", "k", V "k" @: Nil); (Get, "()", "k", V "k" @: I 1)], "x", I 2) ) )
     ]
@@ -93,3 +92,13 @@ let _ =
     [ Let ("id", Lam ("x", V "x"), V "id" @: V "id")
     ; Lam ("x", Lam ("y", V "y") @: V "x" @: I 1)
     ; Lam ("x", Let ("y", V "x" @: I 1, V "y")) ]
+
+let _ =
+  print_examples "Ill-typed examples"
+    [ Lam ("x", V "x" @: V "x")
+    ; ILam ("e", Error, IApp (Lam ("x", V "x"), "e"))
+    ; UHandle
+        ( UHandle
+            ( UOp (Put, UOp (Get, Nil) @: V "y")
+            , ([(Get, "()", "k", V "k" @: Lam ("x", V "x"))], "x", V "x") )
+        , ([(Put, "v", "k", V "k" @: Nil)], "x", V "x") ) ]
