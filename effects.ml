@@ -490,14 +490,26 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
         constrain_eff (eff', pure) ;
         (Forall (a, s, t'), pure)
     | IApp (e, a)                    -> (
-        let t', eff' = infer gamma theta e in
-        match (find_t t', signature_of_instance theta a) with
-        | Forall (a', s', t'), s when s = s' -> subst_instance a' a (t', eff')
-        | t', s ->
+        let t, eff = infer gamma theta e in
+        solve_all_constraints () ;
+        match (find_t t, signature_of_instance theta a) with
+        | Forall (a', s', t'), s ->
+            ( match (s', s) with
+            | Error, Error       -> ()
+            | State t1, State t2 -> constrain_typ (t2, t1)
+            | _                  ->
+                raise
+                  (IllTyped
+                     ( "Instance " ^ a ^ " : " ^ string_of_signature s ^ " application to "
+                     ^ string_of_type_effect (t, eff) )) ) ;
+            subst_instance a' a (t', eff)
+        | t', s                  ->
             raise
               (IllTyped
-                 ( "Instance " ^ a ^ ":" ^ string_of_signature s ^ " application to "
-                 ^ string_of_type_effect (t', eff') )) )
+                 ( "Instance (" ^ a ^ " : " ^ string_of_signature s ^ ") application to ("
+                 ^ string_of_expr e ^ " : "
+                 ^ string_of_type_effect (t', eff)
+                 ^ ") which does not reduce to instance lambda" )) )
     | UOp (op, _)                    ->
         raise
           (IllTyped ("Operator " ^ string_of_op op ^ " used without corresponding handler"))
