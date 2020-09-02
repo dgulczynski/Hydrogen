@@ -103,7 +103,7 @@ let rec string_of_type : typ -> string = function
       ( match find_t t1 with
       | Arrow _ -> "(" ^ string_of_type t1 ^ ") "
       | _       -> string_of_type t1 ^ " " )
-      ^ (match find_e eff with Fixed [] -> "" | eff' -> "-" ^ string_of_effect eff')
+      ^ (match find_e eff with Fixed [] -> "" | eff' -> "-{" ^ string_of_effect eff' ^ "}")
       ^ "-> " ^ string_of_type t2
   | TV {contents= Free a}  -> a
   | TV {contents= Bound t} -> string_of_type t
@@ -118,7 +118,7 @@ and string_of_signature : signature -> string = function
 and string_of_effect : effect -> string =
   let aux = function
     | []      -> ""
-    | i :: is -> "{" ^ List.fold_left (fun i acc -> i ^ " " ^ acc) i is ^ "}"
+    | i :: is -> List.fold_left (fun i acc -> i ^ " " ^ acc) i is
   in
   function
   | Fixed [] -> "ι"
@@ -401,46 +401,49 @@ let reduce (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
         in
         refresh_evs (List.filter_map aux evs)
   in
-  let force_union_e (ecs, free_es, variance, swapped) (ef1, ef2) =
+  let force_union_e (ecs, free_es, bound_es, variance, swapped) (ef1, ef2) =
+    let ef1, ef2 = (find_e ef1, find_e ef2) in
     match (find_e ef1, find_e ef2) with
     | Flexible (is1, ev1), Flexible (is2, ev2) when ev1 = ev2 ->
         expand ev2 (diff is1 is2) ;
-        (ecs, refresh_es free_es, refresh_evs variance, true)
+        (ecs, refresh_es free_es, refresh_es bound_es, refresh_evs variance, true)
     | ( Flexible (is1, ({contents= Free a1} as ev1))
-      , (Flexible (is2, ({contents= Free a2} as ev2)) as e2) )
-      when List.mem ev1 free_es || List.mem ev2 free_es ->
+      , (Flexible (is2, ({contents= Free a2} as ev2)) as e2) ) as ec -> (
         expand ev2 (diff is1 is2) ;
-        let variance' =
-          match (List.assoc_opt ev1 variance, List.assoc_opt ev2 variance) with
-          | Some Covariant, _ -> variance
-          | None, _ | _, None -> variance
-          | Some v, Some Invariant | Some Invariant, Some v ->
-              update_ev ev1 Invariant variance
-          | Some v1, Some v2 -> update_ev ev1 (mix_variance v1 v2) variance
-        in
-        ev1 := Bound e2 ;
-        (ecs, refresh_es free_es, refresh_evs variance', true)
-    | Flexible (is1, ({contents= Free a1} as ev1)), Fixed is2 when List.mem ev1 free_es ->
-        ( match List.assoc ev1 variance with
-        | Covariant     -> ev1 := Bound pure
-        | Invariant     ->
-            (* print_string (a1 ^ " is invariant what now???\n") *)
-            ev1 := Bound (Fixed (diff is2 is1))
-        | Contravariant -> ev1 := Bound (Fixed (diff is2 is1)) ) ;
-        (ecs, refresh_es free_es, refresh_evs variance, true)
-    | (e1, e2) as ec when e1 != e2 -> (ec :: ecs, free_es, variance, swapped)
-    | _ -> (ecs, free_es, variance, swapped)
+        match (List.assoc_opt ev1 variance, List.assoc_opt ev2 variance) with
+        | None, Some Covariant
+         |None, Some Invariant
+         |Some Contravariant, None
+         |Some Invariant, None
+         |Some Covariant, Some Covariant
+         |Some Contravariant, Some Contravariant
+         |Some Invariant, Some Invariant ->
+            ev1 := Bound e2 ;
+            (ecs, refresh_es free_es, refresh_es bound_es, refresh_evs variance, true)
+        | Some Contravariant, Some Invariant
+         |Some Contravariant, Some Covariant
+         |Some Invariant, Some Covariant ->
+            ev1 := Bound e2 ;
+            ( ecs
+            , refresh_es free_es
+            , refresh_es bound_es
+            , refresh_evs (update_ev ev2 Invariant variance)
+            , true )
+        | _ -> (ec :: ecs, free_es, bound_es, variance, swapped) )
+    | (e1, e2) as ec when e1 != e2 -> (ec :: ecs, free_es, bound_es, variance, swapped)
+    | _ -> (ecs, free_es, bound_es, variance, swapped)
   in
-  let rec solve_in_loop ecs free_es variance =
-    match List.fold_left force_union_e ([], free_es, variance, false) ecs with
-    | ecs', free_es', variance', false -> (ecs', free_es', variance')
-    | ecs', free_es', bound_es', true -> solve_in_loop ecs' free_es' bound_es'
+  let rec solve_in_loop ecs free_es bound_es variance =
+    match List.fold_left force_union_e ([], free_es, bound_es, variance, false) ecs with
+    | ecs', free_es', bound_es', variance', false -> (ecs', free_es', bound_es', variance')
+    | ecs', free_es', bound_es', variance', true ->
+        solve_in_loop ecs' free_es' bound_es' variance'
   in
   let bound_es = refresh_evs (snd (free_vars_of_env gamma)) in
   let free_es = refresh_evs (snd (free_univars_of [] (List.map fst bound_es) [typ] [eff])) in
-  let ecs, free_es, variance =
-    solve_in_loop ecs (List.map fst free_es)
-      (refresh_evs (merge_variance_list free_es bound_es))
+  let variance = refresh_evs (merge_variance_list free_es bound_es) in
+  let ecs, free_es, _, variance =
+    solve_in_loop ecs (List.map fst free_es) (List.map fst bound_es) variance
   in
   List.iter
     (fun ev ->

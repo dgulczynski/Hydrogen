@@ -62,6 +62,7 @@ let _ =
 let _ =
   print_examples "Simple examples"
     [ Lam ("x", V "x")
+    ; Lam ("g", Lam ("f", Lam ("x", V "g" @: V "f" @: V "x")))
     ; Lam ("x", V "x" @: I 2)
     ; Lam ("y", Lam ("x", V "x") @: I 1)
     ; Lam ("x", Lam ("y", V "x"))
