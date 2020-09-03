@@ -367,9 +367,12 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
   in
   function t, e -> (aux_type (find_t t), aux_eff (find_e e))
 
-let reduce (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
-    type_effect * effect constraints =
-  (* TODO: Is it less messy now? *)
+let solve_simple (tcs : typ constraints) (ecs : effect constraints) : effect constraints =
+  List.fold_right union_e (List.fold_right union_t tcs ecs) []
+
+let solve_within (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
+    effect constraints =
+  (* TODO: It may be less messy now *)
   let rec find_ev ev =
     match ev with
     | {contents= Free _} -> Some ev
@@ -379,34 +382,31 @@ let reduce (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
   let refresh_es evs = List.sort_uniq compare (List.filter_map find_ev evs) in
   let refresh_evs evs =
     let rec aux = function
-      | (x, vx) :: ((y, vy) :: ys' as ys) ->
-          if x != y then (x, vx) :: aux ys else aux ((x, mix_variance vx vy) :: ys')
-      | xs -> xs
+      | (x, v) :: (x', v') :: xvs when x = x' -> aux ((x, mix_variance v v') :: xvs)
+      | xv :: xvs -> xv :: aux xvs
+      | [] -> []
     in
     aux
       (List.sort_uniq compare
-         (List.filter_map
-            (fun (e, v) -> match find_ev e with Some e' -> Some (e', v) | None -> None)
-            evs))
+         (List.filter_map (fun (e, v) -> Option.map (fun e' -> (e', v)) (find_ev e)) evs))
   in
   let update_ev e v evs =
+    let evs = refresh_evs evs in
     match find_ev e with
-    | None   -> refresh_evs evs
+    | None   -> evs
     | Some e ->
         let aux (e', v') =
-          match find_ev e' with
-          | Some e' when e' = e -> Some (e', mix_variance v v')
-          | Some e' -> Some (e', v')
-          | None -> None
+          Option.map
+            (fun e' -> if e' = e then (e', mix_variance v v') else (e', v'))
+            (find_ev e')
         in
-        refresh_evs (List.filter_map aux evs)
+        List.filter_map aux evs
   in
-  let force_union_e (ecs, free_es, bound_es, variance, swapped) (ef1, ef2) =
-    let ef1, ef2 = (find_e ef1, find_e ef2) in
+  let force_union_e (ecs, variance, swapped) (ef1, ef2) =
     match (find_e ef1, find_e ef2) with
     | Flexible (is1, ev1), Flexible (is2, ev2) when ev1 = ev2 ->
         expand ev2 (diff is1 is2) ;
-        (ecs, refresh_es free_es, refresh_es bound_es, refresh_evs variance, true)
+        (ecs, refresh_evs variance, true)
     | ( Flexible (is1, ({contents= Free a1} as ev1))
       , (Flexible (is2, ({contents= Free a2} as ev2)) as e2) ) as ec -> (
         expand ev2 (diff is1 is2) ;
@@ -419,39 +419,32 @@ let reduce (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
          |Some Contravariant, Some Contravariant
          |Some Invariant, Some Invariant ->
             ev1 := Bound e2 ;
-            (ecs, refresh_es free_es, refresh_es bound_es, refresh_evs variance, true)
+            (ecs, refresh_evs variance, true)
         | Some Contravariant, Some Invariant
          |Some Contravariant, Some Covariant
          |Some Invariant, Some Covariant ->
             ev1 := Bound e2 ;
-            ( ecs
-            , refresh_es free_es
-            , refresh_es bound_es
-            , refresh_evs (update_ev ev2 Invariant variance)
-            , true )
-        | _ -> (ec :: ecs, free_es, bound_es, variance, swapped) )
-    | (e1, e2) as ec when e1 != e2 -> (ec :: ecs, free_es, bound_es, variance, swapped)
-    | _ -> (ecs, free_es, bound_es, variance, swapped)
-  in
-  let rec solve_in_loop ecs free_es bound_es variance =
-    match List.fold_left force_union_e ([], free_es, bound_es, variance, false) ecs with
-    | ecs', free_es', bound_es', variance', false -> (ecs', free_es', bound_es', variance')
-    | ecs', free_es', bound_es', variance', true ->
-        solve_in_loop ecs' free_es' bound_es' variance'
+            (ecs, refresh_evs (update_ev ev2 Invariant variance), true)
+        | _ -> (ec :: ecs, variance, swapped) )
+    | (e1, e2) as ec when e1 != e2 -> (ec :: ecs, variance, swapped)
+    | _ -> (ecs, variance, swapped)
   in
   let bound_es = refresh_evs (snd (free_vars_of_env gamma)) in
   let free_es = refresh_evs (snd (free_univars_of [] (List.map fst bound_es) [typ] [eff])) in
   let variance = refresh_evs (merge_variance_list free_es bound_es) in
-  let ecs, free_es, _, variance =
-    solve_in_loop ecs (List.map fst free_es) (List.map fst bound_es) variance
+  let ecs, variance =
+    let rec solve_in_loop ecs variance =
+      match List.fold_left force_union_e ([], variance, false) ecs with
+      | ecs', variance', false -> (ecs', variance')
+      | ecs', variance', true  -> solve_in_loop ecs' variance'
+    in
+    solve_in_loop ecs variance
   in
   List.iter
     (fun ev ->
-      match List.assoc_opt ev (refresh_evs variance) with
-      | Some Covariant -> ev := Bound pure
-      | _              -> ())
-    (diff (refresh_es free_es) (refresh_es (List.map fst bound_es))) ;
-  ((find_t typ, find_e eff), ecs)
+      match List.assoc_opt ev variance with Some Covariant -> ev := Bound pure | _ -> ())
+    (diff (refresh_es (List.map fst free_es)) (refresh_es (List.map fst bound_es))) ;
+  ecs
 
 let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
     env * type_effect * typ constraints * effect constraints =
@@ -459,15 +452,14 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
   let add_to_env x_t = env := x_t :: !env
   and constrain_typ tc = tcs := tc :: !tcs
   and constrain_eff ec = ecs := ec :: !ecs
-  and solve_all_constraints () =
-    ecs := List.fold_right union_e (List.fold_right union_t !tcs !ecs) [] ;
+  and solve_simple_constraints () =
+    ecs := solve_simple !tcs !ecs ;
     tcs := []
   in
   let solve_constraints_within gamma (t, e) =
-    solve_all_constraints () ;
-    let t_e, ecs' = reduce gamma (t, e) !ecs in
-    ecs := ecs' ;
-    t_e
+    solve_simple_constraints () ;
+    ecs := solve_within gamma (t, e) !ecs ;
+    (find_t t, find_e e)
   in
   let rec infer gamma theta = function
     | Nil                            -> (Unit, pure)
