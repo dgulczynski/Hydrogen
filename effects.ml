@@ -17,7 +17,7 @@ type typ =
   | Int
   | Arrow  of typ * typ * effect
   | TV     of typ univar ref
-  | GT     of identifier
+  | GenTyp of identifier
   | Forall of instance * signature * typ
   | Bad
 
@@ -26,7 +26,7 @@ and signature = Error | State of typ
 and effect =
   | Fixed    of instance set
   | Flexible of instance set * effect univar ref
-  | GE       of identifier
+  | GenEff   of instance set * identifier
 
 type type_effect = typ * effect
 
@@ -81,13 +81,17 @@ let rec merge (xs : 'a set) (ys : 'a set) : 'a set =
 
 let pure : effect = Fixed empty
 
+let sig_map (f : typ -> typ) : signature -> signature = function
+  | Error   -> Error
+  | State t -> State (f t)
+
 let rec find_e : effect -> effect = function
   | Flexible ([], {contents= Bound e}) -> find_e e
   | Flexible (is, {contents= Bound e}) -> (
     match find_e e with
     | Fixed is'          -> Fixed (merge is is')
     | Flexible (is', e') -> Flexible (merge is is', e')
-    | e                  -> e )
+    | GenEff (is', gv)   -> GenEff (merge is is', gv) )
   | e -> e
 
 let rec find_t : typ -> typ = function
@@ -96,6 +100,7 @@ let rec find_t : typ -> typ = function
       let t' = find_t t in
       tv := Bound t' ;
       t'
+  | Forall (a, s, t)               -> Forall (a, sig_map find_t s, find_t t)
   | t                              -> t
 
 let rec string_of_type : typ -> string = function
@@ -109,7 +114,7 @@ let rec string_of_type : typ -> string = function
       ^ "-> " ^ string_of_type t2
   | TV {contents= Free a}  -> a
   | TV {contents= Bound t} -> string_of_type t
-  | GT v                   -> v
+  | GenTyp v               -> v
   | Forall (a, s, t)       -> "∀" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_type t
   | Bad                    -> "ILL-TYPED"
 
@@ -127,7 +132,7 @@ and string_of_effect : effect -> string =
   | Fixed is -> aux is
   | Flexible (is, {contents= Free a}) -> aux is ^ a
   | Flexible (is, {contents= Bound e}) -> aux is ^ string_of_effect e
-  | GE v -> v
+  | GenEff (is, v) -> aux is ^ v
 
 let string_of_op : op -> string = function Raise -> "raise" | Put -> "put" | Get -> "get"
 
@@ -170,12 +175,14 @@ let (freshTV : unit -> typ), (refreshTV : unit -> unit) =
       TV (ref (Free (Printf.sprintf "?τ%d" !counter))))
   , fun () -> counter := -1 )
 
-let (freshEV : instance set -> effect), (refreshEV : unit -> unit) =
+let (fresh_effect_univar : unit -> effect univar ref), (refreshEV : unit -> unit) =
   let counter = ref (-1) in
   ( (fun is ->
       incr counter ;
-      Flexible (is, ref (Free (Printf.sprintf "?ε%d" !counter))))
+      ref (Free (Printf.sprintf "?ε%d" !counter)))
   , fun () -> counter := -1 )
+
+let freshEV (is : instance set) : effect = Flexible (is, fresh_effect_univar ())
 
 let signature_of_instance (theta : ienv) (a : instance) : signature =
   match List.assoc_opt a theta with
@@ -311,28 +318,29 @@ let generalize (gamma : env) (t : typ) : typ =
       counter := !counter + 1 ;
       Printf.sprintf "%c" (char_of_int !counter)
     in
-    ((fun _ -> GT ("'τ" ^ aux ())), fun _ -> GE ("'ε" ^ aux ()))
+    ((fun _ -> GenTyp ("'τ" ^ aux ())), fun is -> GenEff (is, "'ε" ^ aux ()))
   in
   let generalize_e (ftv, fev) = function
     | Flexible (is, ({contents= Free a} as ev)) as eff ->
         if List.assoc_opt ev fev != None then eff
         else (
-          ev := Bound (freshGE is) ;
+          ev := Bound (freshGE empty) ;
           eff )
     | eff -> eff
   in
-  let rec generalize_t (ftv, fev) = function
+  let rec generalize_t ((ftv, fev) as fvs) = function
     | Arrow (t1, t2, eff) ->
-        let t1' = generalize_t (ftv, fev) t1
-        and eff' = generalize_e (ftv, fev) eff
-        and t2' = generalize_t (ftv, fev) t2 in
+        let t1' = generalize_t fvs t1
+        and eff' = generalize_e fvs eff
+        and t2' = generalize_t fvs t2 in
         Arrow (t1', t2', eff')
     | TV ({contents= Free a} as tv) as t ->
         if List.mem tv ftv then t
         else (
           tv := Bound (freshGT ()) ;
           t )
-    | TV {contents= Bound t} -> generalize_t (ftv, fev) t
+    | TV {contents= Bound t} -> generalize_t fvs t
+    | Forall (a, s, t) -> Forall (a, sig_map (generalize_t fvs) s, generalize_t fvs t)
     | t -> t
   in
   generalize_t (free_vars_of_env gamma) (find_t t)
@@ -340,29 +348,39 @@ let generalize (gamma : env) (t : typ) : typ =
 let instantiate (t : typ) : typ =
   let rec instantiate_t t instd =
     match (t, instd) with
-    | Arrow (t1, t2, eff), _    ->
+    | Arrow (t1, t2, eff), _        ->
         let it1, instd1 = instantiate_t t1 instd in
         let it2, instd2 = instantiate_t t2 instd1 in
         let ieff, instdeff = instantiate_e eff instd2 in
         (Arrow (it1, it2, ieff), instdeff)
-    | GT gv, (instd_t, instd_e) -> (
+    | GenTyp gv, (instd_t, instd_e) -> (
       match List.assoc_opt gv instd_t with
       | Some t -> (t, instd)
       | None   ->
           let ntv = freshTV () in
           (ntv, ((gv, ntv) :: instd_t, instd_e)) )
-    | _                         -> (t, instd)
+    | Forall (a, s, t), _           ->
+        let s', instd' = instantiate_s s instd in
+        let t', instd'' = instantiate_t t instd' in
+        (Forall (a, s', t'), instd'')
+    | _                             -> (t, instd)
   and instantiate_e e instd =
     match (find_e e, instd) with
-    | GE gv, (instd_t, instd_e) -> (
+    | GenEff (is, gv), (instd_t, instd_e) -> (
       match List.assoc_opt gv instd_e with
-      | Some e -> (e, instd)
-      | None   ->
-          let nev = freshEV empty in
-          (nev, (instd_t, (gv, nev) :: instd_e)) )
-    | e, _                      -> (e, instd)
+      | Some ev -> (Flexible (is, ev), instd)
+      | None    ->
+          let nev = fresh_effect_univar () in
+          (Flexible (is, nev), (instd_t, (gv, nev) :: instd_e)) )
+    | e, _ -> (e, instd)
+  and instantiate_s s instd =
+    match s with
+    | Error   -> (s, instd)
+    | State t ->
+        let t', instd' = instantiate_t t instd in
+        (State t', instd')
   in
-  fst (instantiate_t t ([], []))
+  fst (instantiate_t (find_t t) ([], []))
 
 let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
   let rec aux_eff =

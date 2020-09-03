@@ -44,6 +44,15 @@ let _ =
             ) ) ]
 
 let _ =
+  print_examples "Effect generalization"
+    [ Let ("apply", Lam ("f", Lam ("x", V "f" @: V "x")), V "apply" @: Lam ("x", V "x"))
+    ; Let
+        ( "update"
+        , ILam
+            ("s", State (GenTyp "'a"), Lam ("f", Op ("s", Put, V "f" @: Op ("s", Get, Nil))))
+        , V "update" ) ]
+
+let _ =
   print_examples "Instance application"
     [ Let
         ( "putx"
@@ -52,11 +61,16 @@ let _ =
             ( "a"
             , IApp (V "putx", "a") @: I 1
             , ([(Put, "v", "k", V "k" @: Nil); (Get, "()", "k", V "k" @: I 1)], "x", I 2) ) )
-    ]
-
-let _ =
-  print_examples "Effect generalization"
-    [Let ("apply", Lam ("f", Lam ("x", V "f" @: V "x")), V "apply" @: Lam ("x", V "x"))]
+    ; Let
+        ( "update"
+        , ILam ("s", State (GenTyp "a"), Lam ("f", Op ("s", Put, V "f" @: Op ("s", Get, Nil))))
+        , Handle
+            ( "b"
+            , Lam ("()", Op ("b", Get, Nil)) @: IApp (V "update", "b") @: Lam ("x", V "x")
+            , ( [ (Get, "()", "k", Lam ("c", (V "k" @: V "c") @: V "c"))
+                ; (Put, "v", "k", Lam ("c", (V "k" @: Nil) @: V "v")) ]
+              , "x"
+              , Lam ("c", V "x") ) ) ) ]
 
 let _ =
   print_examples "Simple examples"

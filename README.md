@@ -20,11 +20,13 @@ Type / effect of handle put 21 {put v k. k () | get () k. k 37 | return x. x} is
 Nested effects:
 Type / effect of λy. handle_a handle_b put_a ((get_b ()) y) {get () k. k (λx. x) | put v k. k () | return x. x} {get () k. k 42 | put v k. k () | return x. x} is Int -> Unit / ι
 
-Instance application:
-Type / effect of let putx = λs:State Int. λx. put_s x in handle_a (putx<a>) 1 {put v k. k () | get () k. k 1 | return x. 2} is Int / ι with env: (putx : ∀s:State Int. Int -{s}-> Unit)
-
 Effect generalization:
 Type / effect of let apply = λf. λx. f x in apply (λx. x) is ?τ4 -> ?τ4 / ι with env: (apply : ('τa -{'εb}-> 'τc) -> 'τa -{'εb}-> 'τc)
+Type / effect of let update = λs:State 'a. λf. put_s (f (get_s ())) in update is ∀s:State ?τ2. (?τ2 -{s?ε5}-> ?τ2) -{s?ε5}-> Unit / ι with env: (update : ∀s:State 'a. ('a -{s'εa}-> 'a) -{s'εa}-> Unit)
+
+Instance application:
+Type / effect of let putx = λs:State Int. λx. put_s x in handle_a (putx<a>) 1 {put v k. k () | get () k. k 1 | return x. 2} is Int / ι with env: (putx : ∀s:State Int. Int -{s}-> Unit)
+Type / effect of let update = λs:State a. λf. put_s (f (get_s ())) in handle_b (λ(). get_b ()) ((update<b>) (λx. x)) {get () k. λc. (k c) c | put v k. λc. (k ()) v | return x. λc. x} is ?τ15 -> ?τ15 / ι with env: (update : ∀s:State a. (a -{s'εa}-> a) -{s'εa}-> Unit)
 
 Simple examples:
 Type / effect of λx. x is ?τ0 -> ?τ0 / ι
