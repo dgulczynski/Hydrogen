@@ -32,16 +32,18 @@ type type_effect = typ * effect
 
 type expr =
   | Nil
-  | I      of int
-  | V      of var
-  | Lam    of var * expr
-  | Fun    of var * var * expr
-  | Let    of var * expr * expr
-  | App    of expr * expr
-  | Op     of instance * op * expr
-  | Handle of instance * signature * expr * handler
-  | ILam   of instance * signature * expr
-  | IApp   of expr * instance
+  | I       of int
+  | V       of var
+  | Lam     of var * expr
+  | Fun     of var * var * expr
+  | Let     of var * expr * expr
+  | App     of expr * expr
+  | Op      of instance * op * expr
+  | Handle  of instance * expr * handler
+  | ILam    of instance * signature * expr
+  | IApp    of expr * instance
+  | UHandle of expr * handler
+  | UOp     of op * expr
 
 and op = Raise | Get | Put
 
@@ -113,7 +115,7 @@ let rec string_of_type : typ -> string = function
 
 and string_of_signature : signature -> string = function
   | Error   -> "Error"
-  | State t -> "State(" ^ string_of_type t ^ ")"
+  | State t -> "State " ^ string_of_type t
 
 and string_of_effect : effect -> string =
   let aux = function
@@ -137,17 +139,17 @@ let rec string_of_expr : expr -> string =
     | e   -> "(" ^ string_of_expr e ^ ")"
   in
   function
-  | Lam (x, e)          -> "λ" ^ x ^ ". " ^ string_of_expr e
-  | Fun (f, x, e)       -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
-  | Let (x, e, e')      -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
-  | App (e1, e2)        -> aux e1 ^ " " ^ aux e2
-  | Op (a, op, e)       -> string_of_op op ^ "_" ^ a ^ " " ^ aux e
-  | Handle (a, s, e, h) ->
-      "handle_" ^ a ^ ":" ^ string_of_signature s ^ " " ^ string_of_expr e ^ " "
-      ^ string_of_handler h
-  | ILam (a, s, e)      -> "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
-  | IApp (e, a)         -> aux e ^ "<" ^ a ^ ">"
-  | e'                  -> aux e'
+  | Lam (x, e)       -> "λ" ^ x ^ ". " ^ string_of_expr e
+  | Fun (f, x, e)    -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
+  | Let (x, e, e')   -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
+  | App (e1, e2)     -> aux e1 ^ " " ^ aux e2
+  | Op (a, op, e)    -> string_of_op op ^ "_" ^ a ^ " " ^ aux e
+  | Handle (a, e, h) -> "handle_" ^ a ^ " " ^ string_of_expr e ^ " " ^ string_of_handler h
+  | ILam (a, s, e)   -> "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
+  | IApp (e, a)      -> aux e ^ "<" ^ a ^ ">"
+  | UOp (op, e)      -> string_of_op op ^ " " ^ aux e
+  | UHandle (e, h)   -> "handle " ^ string_of_expr e ^ " " ^ string_of_handler h
+  | e'               -> aux e'
 
 and string_of_handler : handler -> string = function
   | hs, x, ret ->
@@ -179,6 +181,12 @@ let signature_of_instance (theta : ienv) (a : instance) : signature =
   match List.assoc_opt a theta with
   | None   -> raise (IllTyped ("Free instance " ^ a))
   | Some s -> s
+
+let signature_of_handler ((ops, _, _) as h : handler) : signature =
+  match ops with
+  | [(Raise, _, _, _)] -> Error
+  | [(Get, _, _, _); (Put, _, _, _)] | [(Put, _, _, _); (Get, _, _, _)] -> State (freshTV ())
+  | _ -> raise (IllTyped ("Couldn't infer handler signature from " ^ string_of_handler h))
 
 let type_of_op (s : signature) (a : instance) (op : op) : op_type =
   match (s, op) with
@@ -367,6 +375,17 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
   in
   function t, e -> (aux_type (find_t t), aux_eff (find_e e))
 
+(* Give name to all occurences of anonymous operators *)
+let rec name_unnamed (a : instance) : expr -> expr = function
+  | Lam (x, e)      -> Lam (x, name_unnamed a e)
+  | Fun (f, x, e)   -> Fun (f, x, name_unnamed a e)
+  | Let (x, e, e')  -> Let (x, name_unnamed a e, name_unnamed a e')
+  | App (e1, e2)    -> App (name_unnamed a e1, name_unnamed a e2)
+  | Op _ | Handle _ -> raise (IllTyped "Named and unnamed handlers combined")
+  | UOp (op, e)     -> Op (a, op, e)
+  | UHandle _       -> raise (IllTyped "Nested unnamed handlers")
+  | e               -> e
+
 let solve_simple (tcs : typ constraints) (ecs : effect constraints) : effect constraints =
   List.fold_right union_e (List.fold_right union_t tcs ecs) []
 
@@ -462,20 +481,20 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
     (find_t t, find_e e)
   in
   let rec infer gamma theta = function
-    | Nil                            -> (Unit, pure)
-    | I _                            -> (Int, pure)
-    | V v                            -> (instantiate (type_of_var gamma v), pure)
-    | Lam (x, e)                     ->
+    | Nil                         -> (Unit, pure)
+    | I _                         -> (Int, pure)
+    | V v                         -> (instantiate (type_of_var gamma v), pure)
+    | Lam (x, e)                  ->
         let tx = freshTV () in
         let te, eff = infer ((x, tx) :: gamma) theta e in
         (Arrow (tx, te, eff), pure)
-    | Fun (f, x, e)                  ->
+    | Fun (f, x, e)               ->
         let tfx = freshTV () and tx = freshTV () and f_eff = freshEV empty in
         let tf = Arrow (tx, tfx, f_eff) in
         let te, eff = infer ((f, tf) :: (x, tx) :: gamma) theta e in
         constrain_typ (Arrow (tx, te, eff), tf) ;
         (tf, pure)
-    | Let (x, e, e')                 -> (
+    | Let (x, e, e')              -> (
         let te, eff = infer gamma theta e in
         let te, eff = solve_constraints_within gamma (te, eff) in
         let tx = find_t te in
@@ -491,7 +510,7 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
             constrain_eff (eff, eff'') ;
             constrain_eff (eff', eff'') ;
             (typ', eff'') )
-    | App (e1, e2)                   ->
+    | App (e1, e2)                ->
         let t1, ef1 = infer gamma theta e1 in
         let t2, ef2 = infer gamma theta e2 in
         let t = freshTV () and eff_arr = freshEV empty and eff = freshEV empty in
@@ -500,14 +519,15 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
         constrain_eff (ef1, eff) ;
         constrain_eff (ef2, eff) ;
         (t, eff)
-    | Op (a, op, e)                  ->
+    | Op (a, op, e)               ->
         let t1, t2 = type_of_op_in_env theta a op in
         let e_t, e_eff = infer gamma theta e in
         let eff = freshEV [a] in
         constrain_typ (e_t, t1) ;
         constrain_eff (e_eff, eff) ;
         (t2, eff)
-    | Handle (a, s, e, (hs, x, ret)) ->
+    | Handle (a, e, (hs, x, ret)) ->
+        let s = signature_of_handler (hs, x, ret) in
         let t = freshTV () and eff = freshEV empty in
         let infer_handler (op, x, r, e) =
           let t1, t2 = type_of_op s a op in
@@ -523,19 +543,37 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
         constrain_typ (ret_t, t) ;
         constrain_eff (ret_eff, eff) ;
         (t, eff)
-    | ILam (a, s, e)                 ->
+    | ILam (a, s, e)              ->
         let t', eff' = infer gamma ((a, s) :: theta) e in
         constrain_eff (eff', pure) ;
         (Forall (a, s, t'), pure)
-    | IApp (e, a)                    -> (
-        let t', eff' = infer gamma theta e in
-        match (find_t t', signature_of_instance theta a) with
-        | Forall (a', s', t'), s when s = s' -> subst_instance a' a (t', eff')
-        | t', s ->
+    | IApp (e, a)                 -> (
+        let t, eff = infer gamma theta e in
+        solve_simple_constraints () ;
+        match (find_t t, signature_of_instance theta a) with
+        | Forall (a', s', t'), s ->
+            ( match (s', s) with
+            | Error, Error       -> ()
+            | State t1, State t2 -> constrain_typ (t2, t1)
+            | _                  ->
+                raise
+                  (IllTyped
+                     ( "Instance " ^ a ^ " : " ^ string_of_signature s ^ " application to "
+                     ^ string_of_type_effect (t, eff) )) ) ;
+            subst_instance a' a (t', eff)
+        | t', s                  ->
             raise
               (IllTyped
-                 ( "Instance " ^ a ^ ":" ^ string_of_signature s ^ " application to "
-                 ^ string_of_type_effect (t', eff') )) )
+                 ( "Instance (" ^ a ^ " : " ^ string_of_signature s ^ ") application to ("
+                 ^ string_of_expr e ^ " : "
+                 ^ string_of_type_effect (t', eff)
+                 ^ ") which does not reduce to instance lambda" )) )
+    | UOp (op, _)                 ->
+        raise
+          (IllTyped ("Operator " ^ string_of_op op ^ " used without corresponding handler"))
+    | UHandle (e, h)              ->
+        let a = "?unnamed" in
+        infer gamma theta (Handle (a, name_unnamed a e, h))
   in
   let typ, eff = solve_constraints_within gamma (infer gamma theta expr) in
   (!env, (find_t typ, find_e eff), !tcs, !ecs)
