@@ -12,7 +12,11 @@
 % zlamaniu wierszy w temacie pracy, zwlaszcza tego w jezyku pracy. Uzyj do tego
 % polecenia \fmlinebreak.
 \polishtitle    {Inferencja typów dla języka programowania z efektami algebraicznymi}
-\englishtitle   {Implementation of type inference \fmlinebreak for a programming language \fmlinebreak with algebraic effects}
+\englishtitle   {
+    Implementation of type inference \fmlinebreak
+    for a programming language \fmlinebreak
+    with algebraic effects
+}
 \polishabstract {\lipsum[2]}
 \englishabstract{\lipsum[1]}
 % w pracach wielu autorow nazwiska mozna oddzielic poleceniem \and
@@ -34,7 +38,8 @@
 %
 %%%%% WŁASNE DEFINICJE I POLECENIA
 %
-%\theoremstyle{definition} \newtheorem{definition}{Definition}[chapter]
+% \theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
 %\theoremstyle{remark} \newtheorem{remark}[definition]{Observation}
 %\theoremstyle{plain} \newtheorem{theorem}[definition]{Theorem}
 %\theoremstyle{plain} \newtheorem{lemma}[definition]{Lemma}
@@ -68,19 +73,27 @@
 \chapter{Introduction}
 
 Type inference is a process of generating types for expression. 
-It is a processing of answering to the question ``what type is this term''?
 It is present in many mainstream programming languages in some form or other.
-Most popular type inference algorithm, called $\mathbb{W}$ was presented by Milner\cite{milner} and blah blah.
+Most popular type inference algorithm, called $\mathbb{W}$ was presented by Milner\cite{milner}
+and is the basis for type inference present in most of the statically typed
+functional programming languages.
 
+Type systems like System-F or Hindley-Milner's, based on the textit{lambda calculus}
+are great mathematical models of describing pure computations and types of pure terms concisely.
+But, real-life programs heavily use side effects.
+Be it writing to memory, performing I/O or mutating state, and those systems cannot express them.
 
-In every day programming side effects occur often,
-be it writing to memory, performing I/O or mutating state.
+There are different ways of describing side effects in both scientific literature
+and real world implementations of programming languages.
+Some languages do not restrict side effects, like OCaml,
+some have their unique way of expressing side effects, like Haskell and its monadic actions.
+Finally there are so called type-and-effect systems.
 
-Type systems like Hindley-Milner or System-F describe types of pure terms concisely, but programming languages have side effects that they heavily use and those systems cannot describe them.
-A lot of code is impure blah blah, and while there's lambda calculus which is great mathematical model for pure computation, it cannot do effects.
-There are different ways of describing side effects in both scientific literature and real world implementations of programming languages.
-Some languages do not restrict side effects, like OCaml, some have their unique way of expressing side effects, like Haskell and its monadic actions
-Finally there are so called type/effect systems, which have recently gained scholars' attention.
+The particular system presented by Biernacki et al\cite{binders-labels} uses \textit{algebraic effects} to describe
+programming with computational effects.
+An effect is defined by a set of provided operations, which provide no meaning
+on their own, acting much like ordinary functions, and a handler, which
+defines what do operation calls actually do.
 
 One could think of effects as a generalization of exceptions:
 calling an operator corresponds to throwing an exception,
@@ -88,11 +101,12 @@ and enclosing expression by handler, corresponds to \textit{try \{...\} catch \{
 construct known in some form in many mainstream languages.
 But, in most of those languages exceptions are not \textit{resumable},
 meaning that once we \textit{leave} the inner expression of a handler,
-by calling one of its' operators, we cannot \textit{come back inside} the handled expression. 
+by calling one of its operators, we cannot continue computation of
+the handled expression. 
 
-
-We  transform calculus from to Hindley-Milner world.
-We present type-and-effect system and corresponding calculus together with type inference algorithm for it.  
+We transform calculus given by Biernacki et al to the world of ML programming
+by presenting modified type-and-effect system and corresponding calculus
+together with type inference algorithm for it.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Calculus}
@@ -142,13 +156,15 @@ Terms (or expressions) are given by:
     instance of specified signature,
     \item applications: $e_1\:e_2$ and $e\:a$, for applying arguments to respective abstractions, 
     \item let-construct: $\textbf{let } x = e_1 \textbf{ in } e_2$, which first evaluates body of $e_1$,
-    and bounds its' value to variable $x$ in expression $e_2$,
+    and bounds its value to variable $x$ in expression $e_2$,
     \item operation calls: $op_a\:e$ calling the $op$ operator handler of instance $a$ with value
     of $e$,
-    \item handlers: $\textbf{handle}_a \: e\: \{h;\textbf{return } x. e_r\}$ of instance $a$, which provides meaning to operators: calling $op_a\:e_x$, executes body $e_{op}$ of a construct $(op, x, k.\:e_{op})$ defined in $h$, in which $x$ gets bounds to value of $e_x$.
-    Supplying the \textit{continuation} $k$ with some value $v$ continues evaluation of $e$, with $v$ substituted in place
-    oh operation call.
-    But there's nothing special about $k$, in a sense it's just a function, and programmer may use it
+    \item handlers: $\textbf{handle}_a \: e\: \{h;\textbf{return } x. e_r\}$ of instance $a$, 
+    which provides meaning to operators: calling $op_a\:e_x$, executes body $e_{op}$ of
+    a construct $(op, x, k.\:e_{op})$ defined in $h$, in which $x$ gets bounds to value of $e_x$.
+    Supplying the \textit{continuation} $k$ with some value $v$ continues evaluation of $e$,
+    with $v$ substituted in place of operation call.
+    In a sense $k$ acts just like an ordinary function, and programmer may use it
     in many different ways or not even use it all, returning a value straight from the handler code.
     After $e$ is evaluated, its value is bound to $x$ in $e_r$ expression,
     which is the final value returned by handler.
@@ -169,7 +185,7 @@ We have tweaked the type-and-effect system constructed by Biernacki et al\cite{b
 to match the restrictions required by classical methods of type inference.
 Thus, we introduce \textit{unification variables} for both types and effects
 (written $t$ and $\epsilon$, respectively).
-We use these variables to denote ``yet to be determined`` types.
+We use these variables to denote ``yet to be determined'' types.
 During the type inference we will \textit{generate} these unification variables,
 and deduce rigid types for them, as described in \hyperlink{chapter.4}{Chapter 4}.
 
@@ -266,7 +282,8 @@ $$
     \types{e\:b}{\tau[b/a]}{\iota}
 }
 $$
-For handling different instances of same effect, i.e two cells of memory of $\textbf{State }\tau$, there are lambda terms, which can be applied with instances bound by handlers or other instance lambdas.
+For handling different instances of same effect, i.e two cells of memory of $\textbf{State }\tau$,
+there are lambda terms, which can be applied with instances bound by handlers or other instance lambdas.
 .
 
 $$
@@ -277,7 +294,8 @@ $$
     \types{op_a \: e}{\tau}{a \circ \varepsilon}
 }
 $$
-Then the operators of instance $a$ and type $\tau_1 \rightarrow \tau_2$ if applied with some expression $e$ of type $\tau_1$ and effect $\varepsilon$ are typed with $\tau_2 /{ a \circ \varepsilon}$ 
+Then the operators of instance $a$ and type $\tau_1 \rightarrow \tau_2$ if applied with
+some expression $e$ of type $\tau_1$ and effect $\varepsilon$ are typed with $\tau_2 /{ a \circ \varepsilon}$ 
 
 $$
  \inference{
@@ -386,14 +404,18 @@ Clearly this property gives us flexibility, while keeping effects under control.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Parametricity}
-Our type system maintains predicative prenex polymorphism of ML, extended with universal quantification over effects because original paper maintains it.
+Our type system maintains predicative prenex polymorphism of ML,
+extended with universal quantification over effects because original paper maintains it.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Principal type}
-In ML type system, the \textit{principal type} property states that there exists a \textit{most general} type for any correct program\cite{principal}. 
-A type scheme $\pi$ is called \textit{principal} if any other type that could be given to $e$ is an \textit{instantiaton} of it.
-For example, consider $e = \lam x$. There's a few types that could be given to it: $\arrow{\textbf{Int}}{}{\textbf{Int}}$, 
+In ML type system, the \textit{principal type} property states that there exists
+a \textit{most general} type for any correct program\cite{principal}. 
+A type scheme $\pi$ is called \textit{principal} if any other type that
+could be given to $e$ is an \textit{instantiaton} of it.
+For example, consider $e = \lam x$.
+There's a few types that could be given to it: $\arrow{\textbf{Int}}{}{\textbf{Int}}$, 
 but clearly any correct type we would think of would not be more general than $\forall \alpha . \arrow{\alpha}{}{\alpha}$.
 
 In our type system, $\pi$ is a principal type of $e$ in environments $\Gamma$, $\Theta$ if
@@ -402,6 +424,7 @@ $$ \types{e}{\pi}{\iota} \quad\wedge\quad
     \forall \vec{\tau}.\: \exists \vec{\tau'}.\:
     \pi[\vec{\tau} / \vec{\alpha}] <: \pi'[\vec{\tau'} / \vec{\alpha'}]
 $$
+
 For details about subtyping and principal type, see \hyperlink{chapter.6}{future work}.
 For now we will give an example of how to approximate principal type.
 Consider function composition, expressed in our calculus as term
@@ -463,8 +486,6 @@ to the practical inference algorithm.
 Hence, we heavily use \textit{unification variables}
 (denoted $t$ for types and $\epsilon$ for effects) 
 and the rules are somewhat \textit{algorithmic}, meaning the focus shifts from \textit{checking} to \textit{obtaining} a type.
-If we think about effects as sets of instances,
-then the subtyping relation of effects simply boils down to set inclusion.
 
 \section{Remarks on effect unification}
 With combining effect \textit{unification variables} and constraint solving, a problem arises.
@@ -476,7 +497,7 @@ To resolve such constraint we have a few viable options:
     \item Expand $\epsilon_2$ with $a$.
     \item Expand both $\epsilon_1$ and $\epsilon_2$ with $a$.
 \end{enumerate}
-But how would we choose one over the other? Maybe one of those makes the program ill-typed, while the other does not? What if there's more than two unification variables? Clearly such constraints are undesirable.
+But how would we choose one over the other? Maybe one of those makes the program ill-typed, while the others do not? What if there's more than two unification variables? Clearly such constraints are undesirable.
 
 To tackle this problem, in our algorithm we permit no more than one effect
 \textit{unification variable} or \textit{quantified variable} in effects.
@@ -490,7 +511,9 @@ Thus the effects are defined differently than in Chapter 1:
     I & \Coloneqq \iota \mid \{a\} \mid I \cup I \mid I \setminus I
     \quad & \text{(sets of instances)}
 \end{align*}
-So an effect is either just a finite set of instances, or a union of one with either effect \textit{unification variable} or \textit{generalized} effect variable,.
+So an effect is either just a finite set of instances, or a union of one with either effect \textit{unification variable} or \textit{generalized} effect variable.
+If we think about effects as sets,
+then the subtyping relation of effects simply boils down to set inclusion.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Generating constraints}
@@ -499,6 +522,11 @@ we build it by working bottom-up from the leaves through the whole expression tr
 To this end, we have defined judgement $\gens{e}{\tau}{\varepsilon}{C}{S}$ that
 states in the the premise what conditions need to be satisfied for deducing type, 
 and under what constraints $C$ and substitution $S$ we shall interpret it.
+
+It is important that we ``return'' not only constraints, but also a substitution, 
+because some constraints may have been already resolved in
+one sub-tree of the term, effectively changing the environment,
+and we need to take it into account while inferring the other sub-trees.
 
 Judgement $\vdash_{Gen}$ is constructed in a very \textit{algorithmic} way, meaning the focus shifts from \textit{checking} typing derivation to \textit{gathering} constraints and type.
 $$
@@ -515,35 +543,42 @@ $$
 We will write $S[t \mapsto \tau]$ for $[t\mapsto \tau] \circ S$.
 Substitution $id$ is simply an identity function.
 
-We treat this $\vdash_\textbf{Gen}$ judgement as a set of rules for
+Judgement  $\vdash_\textbf{Gen}$ should be trated as a set of rules for
 \textit{generating} types and constraints (working bottom-up) rather than
 a type checker ($\vdash$ working top-down).
-Ideally, for any term $e$ we would like to have that generation would implies syntactic type soundness
-$$
-\gens{e}{\tau}{\varepsilon}{C}{S} \implies
-\operatorname{solve}(\Gamma, C, S) = \emptyset; S' \implies
-\types[S'\Gamma;S'\Theta]{e}{S'\tau}{S'\varepsilon}
-$$
-We do not prove it in this work, but leave it for \hyperlink{chapter.6}{future work}.
-
 We abstract solving constraints $C$ in environment $\Gamma$ (under substitution $S$) to
 a high-level function \textit{solve}, which returns a reduced set of constraints $C'$ and
-a new substitution $S'$.
+a new substitution $S'$. 
 
-%%%% GENERATIVE JUDGEMENT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{definition}{Syntactic type soundness}
+   $$
+   \begin{aligned}
+    \gens{e}{\tau}{\varepsilon}{C}{S} \implies& &\\
+    \operatorname{solve}(\Gamma,\tau/\varepsilon, C, S) = \emptyset; S' & \implies & \\
+      &\types[S'\Gamma;S'\Theta]{e}{S'\tau}{S'\varepsilon} &
+    \end{aligned}
+    $$
+\end{definition}
+We would say that an inference algorithm enjoys \textit{syntactic type soundness}
+if type generated by it (after we solve all the constraints and build the substitution)
+to the given term checks by the syntactic rules we defined in \hyperlink{chapter.3}{chapter 3}.
+Proof of our algorithm is left for \hyperlink{chapter.6}{future work}.
+
 \setlength{\jot}{12pt}
+%%%% GENERATIVE JUDGEMENT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Infering expressions:
 \begin{gather*}
 \begin{gathered}
-    \inference {}{\gens{()}{\textbf{Unit}}{\iota}{\emptyset}{S_{id}}}
-    \qquad
-    \inference {}{\gens{n}{\textbf{Int}}{\iota}{\emptyset}{S_{id}}} {}
+    \inference {}{\gens{()}{\textbf{Unit}}{\iota}{\emptyset}{id}}
+    \quad
+    \inference {}{\gens{n}{\textbf{Int}}{\iota}{\emptyset}{id}} {}
 \\
     \inference {
         (x : \pi) \in \Gamma & \operatorname{inst}(\pi) = \tau
     }{
-        \gens{x}{\tau}{\iota}{\emptyset}{S_{id}}
+        \gens{x}{\tau}{\iota}{\emptyset}{id}
     }
-    \qquad
+\\
      \inference{
         \gens[\Gamma, (x : t); \Theta]{e}{\tau}{\varepsilon}{C}{S} &
         \fresh{t}
@@ -552,10 +587,10 @@ a new substitution $S'$.
     }
 \\
     \inference{
-        \gens[\Gamma, (f : \arrow{t_1}{\epsilon}{t_2}),(x : t_1); \Theta]{e}{\tau}{\varepsilon}{C}{S} &
         \fresh{t_1} &
         \fresh{\epsilon} &
-        \fresh{t_2}
+        \fresh{t_2} \\
+        \gens[\Gamma, (f : \arrow{t_1}{\epsilon}{t_2}),(x : t_1); \Theta]{e}{\tau}{\varepsilon}{C}{S}
     }{
         \gens{\textbf{fun } f x . e}{\arrow{t_1}{\epsilon}{t_2}}{\iota}
         {C \cup \{\arrow{t_1}{\varepsilon}{\tau} <: \arrow{t_1}{\epsilon}{t_2} \}}{S}
@@ -563,13 +598,14 @@ a new substitution $S'$.
 \\
 \inference{
     \gens{e_1}{\tau_1}{\varepsilon_1}{C_1}{S_1} &
-    \gens[S_1\Gamma;S_1\Theta]{e_2}{\tau_2}{\varepsilon_2}{C_2}{S_2} &
+    \gens[S_1\Gamma;S_1\Theta]{e_2}{\tau_2}{\varepsilon_2}{C_2}{S_2} \\
     \fresh{t} &
-    \fresh{\epsilon}
+    \fresh{\epsilon} &
+    C = C_1 \cup C_2 \cup \{\varepsilon_1 <: \epsilon ,
+    \varepsilon_2 <: \epsilon, \tau_1 <: \arrow{\tau_2}{\epsilon}{t} \}
 }{
-    \gens{e_1\:e_2}{t}{\epsilon}{
-    C_1 \cup C_2 \cup \{\varepsilon_1 <: \epsilon ,
-    \varepsilon_2 <: \epsilon, \tau_1 <: \arrow{\tau_2}{\epsilon}{t} \}}{S_2  S_1}
+    \gens{e_1\:e_2}{t}{\epsilon}{C
+    }{S_2  S_1}
 }
 \\
 \inference{
@@ -617,21 +653,13 @@ a new substitution $S'$.
     \Theta \vdash op_a : \tau_1 \Rightarrow \tau_2 &
     \gens{e}{\tau_e}{\varepsilon}{C}{S}
 }{
-    \gens{op_a \: e}{\tau_2}{a \circ \varepsilon}{C \cup \{\tau_e <: \tau_1 \}}{S}
-}
+    \gens{op_a \: e}{\tau_2}{a * \varepsilon}{C \cup \{\tau_e <: \tau_1 \}}{S}
+}\end{gathered}
+\end{gather*}
+
+\begin{gather*}
+\begin{gathered}
 \\
-% \inference{
-%     \gens{e}{\textbf{Unit}}{\varepsilon}{C} & a : {\textbf{State } \tau} \in \Theta
-% }{
-%     \gens{\textbf{Get}_a \: e}{\tau}{a \circ \varepsilon}{C}
-% }
-% \\
-% \inference{
-%     \gens{e}{\tau}{\varepsilon}{C} & a : {\textbf{State } \tau} \in \Theta
-% } {
-%     \gens{\textbf{Put}_a \: e}{\textbf{Unit}}{a \circ \varepsilon}{C}
-% }
-%\\
 \inference{
 \gens{h}{\sigma \triangleright t}{\epsilon}{C_h}{S_h} &
 \gens[S_h\Gamma; S_h\Theta, (a:\sigma)]{e}{\tau}{\varepsilon}{C_e}{S_e} \\
@@ -669,22 +697,13 @@ C = C_\textbf{Get} \cup \{ \tau_\textbf{Get} <: \tau,  \varepsilon_\textbf{Get} 
 \end{gather*}
 \setlength{\jot}{3pt}
 
-
-It is important that we ``return'' not only constraints but a substituion also becouse
-some constraints may have been already resolved in the subtree of term
-and we need to take it into account. For example, consider term
-$$
-\lam \textbf{let } y = x\:1 \textbf{ in } y
-$$
-// draw subtree
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Solving constraints}
 The constraint solving algorithm we present is divided in two sub-procedures:
 \begin{enumerate}
     \item \texttt{solve\_simple\_contraints} $C$ $S$\\
-    deals with both type- and effect-constraintsm behaving like ordinary HM algorithm in its' simplest form. As the rules for type subtyping are somewhat trivial, it can solve them efficiently and environment-agnostically. As we explain in following subsection, there are some effect constraints that are \textit{non-trivial} and cannot be resolved so easily, so they are dealt with by the second procedure:
+    deals with both type- and effect-constraintsm behaving, much like the ordinary HM algorithm.
+    As the rules for type subtyping are somewhat trivial, it can solve them efficiently and environment-agnostically. As we explain in following subsection, there are some effect constraints that are \textit{non-trivial} and cannot be resolved so easily, so they are dealt with by the second procedure:
     
     \item \texttt{solve\_contraints\_within} $\Gamma$ $(\tau, \varepsilon)$ $C$ $S$ \\
     deals with effect-constraints regarding effect unification variables ($\epsilon$) occuring in $\Gamma$, $\tau$ and $\varepsilon$.
@@ -736,14 +755,14 @@ $$ \operatorname{solve'}(C, S) = \texttt{solve\_simple}\:C\:S $$
 \subsection{Interesting constraints}
 What makes constraints like $(\epsilon_1 <: I_2 * \epsilon_2)$ interesting is that there are many
 plausible substitutions that satisfy it.
-For every set of instances $I_1 \subseteq I_2$, substitution $\{\epsilon_1 := I_1\}$ or 
-$\{\epsilon_1 := I_1 * \epsilon_2\}$ obviously resolves the constraint, but clearly some substitutions are better than others. 
+For every set of instances $I_1 \subseteq I_2$, substitution $[\epsilon_1 \mapsto I_1]$ or 
+$[\epsilon_1 \mapsto I_1 * \epsilon_2]$ obviously resolves the constraint, but clearly some substitutions are better than others. 
 
-As discussed in previous chapter, $\rightarrow$ type constructor is contravariant to subtyping relation, which plays a great role in how we treat effect unification variables.
+As discussed in previous chapter, $\rightarrow$ type constructor is \textit{contravariant} to subtyping relation, which plays a great role in how we treat effect unification variables.
 During computation of \texttt{solve\_constraints\_within} $\Gamma$ $\tau/\varepsilon$ we keep information about $variance$ of effect unification variables as a function $V$.
 $$\textbf{variance} \ni v \Coloneqq \oplus \mid \odot \mid \ominus \mid \times$$
-If variable $\epsilappear$ appears in $\Gamma$, $\tau$, and $\varepsilon$ only in \textit{covariant} (\textit{positive}) positions, then $V(\epsilon) = \oplus$.
-If it appears only \textit{covariantly} (\textit{negatively}) then$V(\epsilon) = \ominus$. If it appears \textit{invariantly} (\textit{both} positively and negatively), then $V(\epsilon) = \odot$. Finally, if $\varepsilon$ doesn't appear in type or environment at all, then $V(\epsilon) = \times$.
+If variable $\epsilon$ appears in $\Gamma$, $\tau$, and $\varepsilon$ only in \textit{covariant} (\textit{positive}) positions, then $V(\epsilon) = \oplus$.
+If it appears only \textit{contravariantly} (\textit{negatively}) then $V(\epsilon) = \ominus$. If it appears \textit{invariantly} (\textit{both} positively and negatively), then $V(\epsilon) = \odot$. Finally, if $\varepsilon$ doesn't appear in type or environment at all, then $V(\epsilon) = \times$.
 
 Because of the way we defined subtyping relation, we can \textit{shrink} any covariant effect and \textit{expand} any contravariant effect.
 Consider type $\tau$ with some covariant effect $\varepsilon_\oplus$.
@@ -756,8 +775,8 @@ $$ \tau[\varepsilon_\ominus' / \varepsilon_\ominus] <: \tau$$
 
 It is important to include the non appearing variables in our algorithm as well, as there are many unification variables that are generated along the way that do not appear explicetly, but often do form \textit{chains} of subtyping constraints like
 $$\epsilon_\ominus <: \epsilon_1 <: \dots <: \epsilon_n <: \epsilon_\oplus \text{ where } V(\epsilon_i) = \times$$
-In such case, we want $\epsilon_\ominus$ to be \textit{the biggest} and $\epsilon_\oplus$ to be \textit{the smallest} possible, so we would like to deduce the substitution
-$$\epsilon_\ominus = \epsilon_1 = \dots = \epsilon_n = \epsilon_\oplus$$
+In such case, we want $\epsilon_\ominus$ to be \textit{the biggest} and $\epsilon_\oplus$ to be \textit{the smallest} possible, so we would like to deduce the substitution $S$ such that
+$$S\epsilon_\ominus = S\epsilon_1 = \dots = S\epsilon_n = S\epsilon_\oplus$$
 as it guarantees that it is in fact the case.
 
 Sketch of algorithm:
@@ -774,7 +793,7 @@ solve_contraints_within $\Gamma$ $\tau/ \varepsilon$ $C$ $S$ =
           $C := C \setminus \{I_1 * \epsilon_1 <: I_2 * \epsilon_2 \}$;
           $S := S[\epsilon_1 \mapsto I_2 * \epsilon_2]$;
           $V := V[\epsilon_2 \mapsto \odot]$
-  for $(\epsilon, \oplus) \in V$:
+  for $(\epsilon, \oplus) \in V$ where $\epsilon \notin S\Gamma$:
       $S := S[\epsilon\mapsto\iota]$
   return $C,S$
 \end{lstlisting}
@@ -789,7 +808,7 @@ Finally, we can define function $\operatorname{solve'}$ from $ \vdash_\textbf{Ge
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Illustrative example}
-As now we know how \textit{solve} functions work, let's take a look how constraints for term would be generated and resolved.
+No what we have a complete picture of how the inference algorithm works, let's take a look how constraints for term would be generated and resolved.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Implementation}
