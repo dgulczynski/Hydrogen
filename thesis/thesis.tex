@@ -1,0 +1,860 @@
+% Opcje klasy 'iithesis' opisane sa w komentarzach w pliku klasy. Za ich pomoca
+% ustawia sie przede wszystkim jezyk i rodzaj (lic/inz/mgr) pracy, oraz czy na
+% drugiej stronie pracy ma byc skladany wzor oswiadczenia o autorskim wykonaniu.
+\documentclass[declaration,shortabstract]{iithesis}
+
+\usepackage[utf8]{inputenc}
+
+%%%%% DANE DO STRONY TYTUŁOWEJ
+% Niezaleznie od jezyka pracy wybranego w opcjach klasy, tytul i streszczenie
+% pracy nalezy podac zarowno w jezyku polskim, jak i angielskim.
+% Pamietaj o madrym (zgodnym z logicznym rozbiorem zdania oraz estetyka) recznym
+% zlamaniu wierszy w temacie pracy, zwlaszcza tego w jezyku pracy. Uzyj do tego
+% polecenia \fmlinebreak.
+\polishtitle    {Inferencja typów dla języka programowania z efektami algebraicznymi}
+\englishtitle   {Implementation of type inference \fmlinebreak for a programming language \fmlinebreak with algebraic effects}
+\polishabstract {\lipsum[2]}
+\englishabstract{\lipsum[1]}
+% w pracach wielu autorow nazwiska mozna oddzielic poleceniem \and
+\author         {Dominik Gulczyński}
+% w przypadku kilku promotorow, lub koniecznosci podania ich afiliacji, linie
+% w ponizszym poleceniu mozna zlamac poleceniem \fmlinebreak
+\advisor        {dr Filip Sieczkowski}
+%\date          {}                     % Data zlozenia pracy
+% Dane do oswiadczenia o autorskim wykonaniu
+% \transcriptnum {}                     % Numer indeksu
+% \advisorgen    {} % Nazwisko promotora w dopelniaczu
+%%%%%
+
+%%%%% WLASNE DODATKOWE PAKIETY
+%
+%\usepackage{graphicx,listings,amsmath,amssymb,amsthm,amsfonts,tikz}
+\usepackage{lipsum}
+\usepackage{amsmath,amssymb,mathtools,listings, proof, semantic, wasysym}
+%
+%%%%% WŁASNE DEFINICJE I POLECENIA
+%
+%\theoremstyle{definition} \newtheorem{definition}{Definition}[chapter]
+%\theoremstyle{remark} \newtheorem{remark}[definition]{Observation}
+%\theoremstyle{plain} \newtheorem{theorem}[definition]{Theorem}
+%\theoremstyle{plain} \newtheorem{lemma}[definition]{Lemma}
+%\renewcommand \qedsymbol {\ensuremath{\square}}
+%
+\newcommand{\types}[4][\Gamma;\Theta]{\ensuremath{{{#1} \vdash {#2} \: : {#3}/{#4}}}}
+\newcommand{\gens}[6][\Gamma;\Theta]{\ensuremath{{{#1} \vdash_\textbf{Gen} {#2} \: : {#3}/{#4}} \rightsquigarrow {#5};{#6}}}
+\newcommand{\arrow}[3]{{#1}\rightarrow_{#2}{#3}}
+\newcommand{\lam}[1][x]{\ensuremath{\lambda #1.\:}}
+\newcommand{\optypes}[5][\Theta]{\ensuremath{{#1}\vdash{#2}_{#3} : {#4} \Rightarrow {#5}}}
+\newcommand{\ops}[2]{\optypes{op}{a}{#1}{#2}}
+\newcommand{\fresh}[1]{\ensuremath{\operatorname{fresh}({#1})}}
+\lstset{
+ language=caml,
+ columns=[c]fixed,
+ basicstyle=\small\ttfamily,
+ keywordstyle=\bfseries,
+ upquote=true,
+ commentstyle=,
+ breaklines=true,
+ showstringspaces=false,
+ stringstyle=\color{blue},
+ literate={'"'}{\textquotesingle "\textquotesingle}3,
+%   basicstyle=\ttfamily,
+  mathescape
+}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+%%%%% POCZĄTEK ZASADNICZEGO TEKSTU PRACY %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Introduction}
+
+Type inference is a process of generating types for expression. 
+It is a processing of answering to the question ``what type is this term''?
+It is present in many mainstream programming languages in some form or other.
+Most popular type inference algorithm, called $\mathbb{W}$ was presented by Milner\cite{milner} and blah blah.
+
+
+In every day programming side effects occur often,
+be it writing to memory, performing I/O or mutating state.
+
+Type systems like Hindley-Milner or System-F describe types of pure terms concisely, but programming languages have side effects that they heavily use and those systems cannot describe them.
+A lot of code is impure blah blah, and while there's lambda calculus which is great mathematical model for pure computation, it cannot do effects.
+There are different ways of describing side effects in both scientific literature and real world implementations of programming languages.
+Some languages do not restrict side effects, like OCaml, some have their unique way of expressing side effects, like Haskell and its monadic actions
+Finally there are so called type/effect systems, which have recently gained scholars' attention.
+
+One could think of effects as a generalization of exceptions:
+calling an operator corresponds to throwing an exception,
+and enclosing expression by handler, corresponds to \textit{try \{...\} catch \{...\}}
+construct known in some form in many mainstream languages.
+But, in most of those languages exceptions are not \textit{resumable},
+meaning that once we \textit{leave} the inner expression of a handler,
+by calling one of its' operators, we cannot \textit{come back inside} the handled expression. 
+
+
+We  transform calculus from to Hindley-Milner world.
+We present type-and-effect system and corresponding calculus together with type inference algorithm for it.  
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Calculus}
+The calculus we present is a subset of work by Biernacki et al\cite{binders-labels}.
+It is an extension of standard \textit{call-by-value lambda calculus with let} by effect handlers and operators. 
+We adjusted it to match the style of \textit{ML-the-calculus} and \textit{ML-the-type-system}\cite{emlti}. 
+%%%% CALCULUS' SYNTAX %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{align*} 
+\textbf{var} & \ni x , \dots & \text{(term variables)}
+\\ 
+\textbf{qvar} & \ni \alpha , \dots & \text{(quantified variables)}
+\\ 
+\textbf{tvar} & \ni t , \dots & \text{(type variables)}
+\\ 
+\textbf{evar} & \ni \epsilon , \dots & \text{(effect variables)}
+\\ 
+\textbf{ivar} & \ni a , \dots & \text{(instance variables)}
+\\ 
+\textbf{type} & \ni \tau \Coloneqq
+\alpha \mid t \mid \textbf{Unit} \mid \textbf{Int} \mid \arrow{\tau}{\varepsilon}{\tau}
+\mid \forall (a : \sigma) .\: \tau
+ & \text{(types)}
+\\
+\textbf{scheme} & \ni \pi \Coloneqq \forall \alpha.\:\pi \mid \tau &\text{(type schemes)}
+\\ 
+\textbf{effect} & \ni \varepsilon \Coloneqq 
+\alpha \mid \epsilon \mid a \mid \varepsilon \circ \varepsilon 
+ & \text{(effects)}
+\\ 
+\textbf{signature} & \ni \sigma \Coloneqq \textbf{Error} \mid \textbf{State } \tau& \text{(signatures)}
+\\
+\textbf{expr} & \ni e \Coloneqq x \mid () \mid n \mid \lam e \mid \textbf{fun }f\:x.\:e \mid e \: e \mid \textbf{let } x = e \: \textbf{ in } \: e & \text{(terms)}
+\\
+ & \qquad\qquad \mid \lam[(a : \sigma)] e \mid e \: a \mid op_a \: e \mid \textbf{handle}_a \: e\: \{h; \textbf{return } x. e\}
+\\
+\textbf{operator} & \ni op \Coloneqq \textbf{Raise} \mid \textbf{Get} \mid \textbf{Put} & \text{(operators)} 
+\\ 
+\textbf{handler} & \ni h \Coloneqq [(\textbf{Raise}, x, k. e)] \mid [(\textbf{Get}, x, k. e); (\textbf{Put}, x, k. e)]& \text{(handlers)}
+\end{align*}
+Terms (or expressions) are given by:
+\begin{itemize}
+    \item variables, bound by abstractions, let-expressions, handlers, or environment $\Gamma$,
+    \item constants: $()$ and $n \in \mathbb{C}$,
+    \item abstractions: anonymous functions $\lam e$ with argument $x$ and body $e$ and recursive functions denoted $\textbf{fun }f\:x.\:e$,
+    \item instance abstraction: $\lam[(a:\sigma)]e$, that lets programmers write code
+    unspecific to certain effect \textit{instance}, but capable of working with any
+    instance of specified signature,
+    \item applications: $e_1\:e_2$ and $e\:a$, for applying arguments to respective abstractions, 
+    \item let-construct: $\textbf{let } x = e_1 \textbf{ in } e_2$, which first evaluates body of $e_1$,
+    and bounds its' value to variable $x$ in expression $e_2$,
+    \item operation calls: $op_a\:e$ calling the $op$ operator handler of instance $a$ with value
+    of $e$,
+    \item handlers: $\textbf{handle}_a \: e\: \{h;\textbf{return } x. e_r\}$ of instance $a$, which provides meaning to operators: calling $op_a\:e_x$, executes body $e_{op}$ of a construct $(op, x, k.\:e_{op})$ defined in $h$, in which $x$ gets bounds to value of $e_x$.
+    Supplying the \textit{continuation} $k$ with some value $v$ continues evaluation of $e$, with $v$ substituted in place
+    oh operation call.
+    But there's nothing special about $k$, in a sense it's just a function, and programmer may use it
+    in many different ways or not even use it all, returning a value straight from the handler code.
+    After $e$ is evaluated, its value is bound to $x$ in $e_r$ expression,
+    which is the final value returned by handler.
+
+\end{itemize}
+
+Instead of allowing effects of arbitrary signatures, we limited it to instances
+of either $\textbf{Error}$ or  $\textbf{State }\tau$.
+Arbitrary signatures could be dealt with in similar fashion as \textit{ADT's}
+(algebraic data types) and are \textit{orthogonal} to type inference.
+
+The semantics of calculus strictly follows rules defined in Biernacki et al\cite{binders-labels}.
+For formal reduction rules etc see their work.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Type system}
+We have tweaked the type-and-effect system constructed by Biernacki et al\cite{binders-labels}
+to match the restrictions required by classical methods of type inference.
+Thus, we introduce \textit{unification variables} for both types and effects
+(written $t$ and $\epsilon$, respectively).
+We use these variables to denote ``yet to be determined`` types.
+During the type inference we will \textit{generate} these unification variables,
+and deduce rigid types for them, as described in \hyperlink{chapter.4}{Chapter 4}.
+
+Judgement $\types[\Gamma, \Theta]{e}{\tau}{\varepsilon}$ states that in environments $\Gamma$ (assigning types to variables),
+and $\Theta$ (assigning signatures to instances), term $e$ \textit{inhabits} syntactical type and effect $\tau / \varepsilon$ (which means that computing $e$ would yield a value of type $\tau$ and possibly cause effect $\varepsilon$).
+
+%%%% SYNTACTIC TYPE JUDGEMENT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Typing terms:
+$$
+\inference{}{\types{()}{\textbf{Unit}}{\iota}}
+\quad
+\inference{}{\types{n}{\textbf{Int}}{\iota}}{}
+$$
+\setlength{\jot}{10pt}
+There are two \textit{base types} \textbf{Unit} and \textbf{Int} for constants.
+$$
+\inference{(x : \pi) \in \Gamma & \pi[\vec{\tau_\alpha} / \vec{\alpha}] = \tau}{\types{x}{\tau}{\iota}}
+$$
+Regarding polymorphism, we only allow prenex polymorphism\textit{universal variables} $\alpha$, which are quantified by $\forall$ in 
+so called \textit{type schemes} (denoted $\pi$).
+Judgement for variables follows the usual let-polymorphism typing, 
+where variables bound by let clauses are generalized and need to be instantiated.
+Variables do not cause effects as only the value is assigned to them,
+while the effects caused by their computation (if any occur)
+are bound to the term which introduced that variable.
+
+$$
+\inference{
+    \types[\Gamma,(x : \tau_1); \Theta]{e}{\tau_2}{\varepsilon} 
+}{
+    \types{\lam e}{\arrow{\tau_1}{\varepsilon}{\tau_2}}{\iota}
+}
+\quad
+\inference{
+    \types[\Gamma, (f : \arrow{\tau_1}{\varepsilon}{t_2}),(x : \tau_1); \Theta]{e}{\tau_2}{\varepsilon} 
+}{
+    \types{\textbf{fun}\:f\:x.\: e}{\arrow{\tau_1}{\varepsilon}{\tau_2}}{\iota}
+}
+$$
+The \textit{type constructor} $\rightarrow$ is used to type abstractions,
+where type $\arrow{\tau_1}{\varepsilon}{\tau_2}$ is given to functions
+that when applied with input of type $\tau_1$, produce some output of type $\tau_2$,
+possibly causing effect $\varepsilon$.
+
+For functions, any effects occurring in their body is ``hanged'' under arrow type,
+meaning applying an argument to the function would cause some effects to occur.
+
+$$
+\inference{
+    \types{e_1}{\arrow{\tau_2}{\varepsilon}{\tau}}{\varepsilon_1} &
+    \types{e_2}{\tau_2}{\varepsilon_2} &
+}{
+    \types{e_1\:e_2}{\tau}{\varepsilon_1 \circ \varepsilon \circ \varepsilon_2}
+}
+$$
+Accordingly, effect of application combines effects of: computing left hand term,
+effect that ``hangs'' on it's arrow type, and the effect of computing the right hand term.
+
+\begin{gather*}
+\begin{gathered}
+\inference{
+    \types{e_1}{\tau_1}{\iota} &
+    \operatorname{gen}(\Gamma, \tau_1) = \pi &
+    \types[\Gamma,(x:\pi);\Theta]{e_2}{\tau}{\varepsilon}
+}{
+    \types{\textbf{let } x = e_1 \textbf{ in } e_2}{\tau}{\varepsilon}
+}
+\\
+\inference{
+    \types{e_1}{\tau_1}{\varepsilon_1} & 
+    \varepsilon_1 \neq \iota & 
+    \types[\Gamma,(x:\tau_1);\Theta]{e_2}{\tau}{\varepsilon}
+}{
+    \types{\textbf{let } x = e_1 \textbf{ in } e_2}{\tau}{\varepsilon}
+}
+\end{gathered}
+\end{gather*}
+
+As usually in let-polymorphism schemes, we \textit{generalize} the type derived for $e_1$ before
+we add it to the environment in which we derive type for $e_2$.
+Here we restrict generalization to only $pure$ terms,
+i.e. such that their computation would cause no effects.
+
+$$
+\inference{
+    \types[\Gamma; \Theta, (a : \sigma)]{e}{\tau}{\iota}
+}{
+    \types{\lam[(a : \sigma)]. e}{\forall (a : \sigma) . \tau}{\iota}
+}
+\quad
+\inference{
+    \types{e}{\forall (a : \sigma) . \tau}{\iota} & (b:\sigma) \in \Theta
+}{
+    \types{e\:b}{\tau[b/a]}{\iota}
+}
+$$
+For handling different instances of same effect, i.e two cells of memory of $\textbf{State }\tau$, there are lambda terms, which can be applied with instances bound by handlers or other instance lambdas.
+.
+
+$$
+\inference{
+    \ops{\tau_e}{\tau} &
+    \types{e}{\tau_e}{\varepsilon} 
+}{
+    \types{op_a \: e}{\tau}{a \circ \varepsilon}
+}
+$$
+Then the operators of instance $a$ and type $\tau_1 \rightarrow \tau_2$ if applied with some expression $e$ of type $\tau_1$ and effect $\varepsilon$ are typed with $\tau_2 /{ a \circ \varepsilon}$ 
+
+$$
+ \inference{
+    \types[\Gamma;\Theta,(a:\sigma)]{e}{\tau'}{a \circ \varepsilon} &
+    \types{h}{\sigma \triangleright \tau}{\varepsilon} &
+    \types[\Gamma,(x:\tau');\Theta]{e_r}{\tau}{\varepsilon}
+}{
+    \types{\textbf{handle}_a \: e\: \{h;\textbf{return } x. e_r\}}{\tau}{\varepsilon}
+}
+$$
+
+
+Finally, we allow every type-and-effect to \textit{grow} as needed:
+$$
+\inference{
+    \types{e}{\tau'}{\varepsilon'} & \tau' <: \tau & \varepsilon' <: \varepsilon
+}{
+    \types{e}{\tau}{\varepsilon}
+}
+$$
+
+Typing handlers:
+\begin{gather*}
+\begin{gathered}
+\inference{
+    \types[\Gamma,(x:\textbf{Unit}), (k:\arrow{\tau'}{\varepsilon}{\tau});\Theta]{e}{\tau}{\varepsilon}
+}{ 
+    \types{ [(\textbf{Raise}, x, k. e)]}{\textbf{Error}\triangleright \tau}{\varepsilon}
+}
+\\
+\inference{
+\types[\Gamma,(x:\textbf{Unit}), (k:\arrow{\tau'}{\varepsilon}{\tau});\Theta]{e_\textbf{Get}}{\tau}{\varepsilon} \\
+\types[\Gamma,(x:\tau'),(k:\arrow{\textbf{Unit}}{\varepsilon}{\tau'});\Theta]{e_\textbf{Put}}{\tau}{\varepsilon} 
+}{
+\types{ [(\textbf{Get}, x, k. e_\textbf{Get});(\textbf{Put}, x, k. e_\textbf{Put})]}{\textbf{State }\tau'\triangleright \tau}{\varepsilon} 
+}
+\end{gathered}
+\end{gather*}
+There are two clauses for typing handlers, as we only have kinds of signatures. It could easily extended for other signatures but that's not important to this work.
+
+Typing operators:
+\begin{gather*}
+\begin{gathered}
+\inference{
+    (a : \textbf{Error}) \in \Theta
+}{
+    \optypes{\textbf{Raise}}{a}{\textbf{Unit}}{\tau}
+}
+\quad 
+\inference{
+    (a : \textbf{State }\tau) \in \Theta
+}{
+    \optypes{\textbf{Put}}{a}{\textbf{Unit}}{\tau}
+}
+\quad 
+\inference{
+    (a : \textbf{State }\tau) \in \Theta
+}{
+    \optypes{\textbf{Get}}{a}{\tau}{\textbf{Unit}}
+}
+\end{gathered}
+\end{gather*}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Subtyping}
+%%%% SUBTYPING RULES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{gather*}
+\begin{gathered}
+\inference{}{\tau <: \tau}
+\quad
+\inference{
+    \tau_1' <: \tau_1 & \varepsilon <: \varepsilon' & \tau_2 <: \tau_2'
+}{
+    \arrow{\tau_1}{\varepsilon}{\tau_2} <: \arrow{\tau_1'}{\varepsilon'}{\tau_2'}
+} 
+\quad
+\inference{}{\varepsilon <: \varepsilon}
+\quad
+\inference{
+    \varepsilon <: \varepsilon'
+}{
+    \varepsilon <: \varepsilon' \circ \varepsilon''
+}
+\end{gathered}
+\end{gather*}
+\setlength{\jot}{3pt}
+The subtyping rule we propose is \textit{structural}, meaning that only types of
+\textit{matching shape} are related.
+However, while leaves containing types must be equal, we allow effects to differ as long as they are related.
+Notice that the $\rightarrow$ is contravariant to subtyping relation.
+
+The subtyping plays a vital role in usability of the calculus.
+Consider a term $f$, a function that does some calculation,
+but allowed the function to fail, i.e.
+$$
+\types[\emptyset, (e: Error)]
+    {f}
+    {\arrow{(\arrow{\textbf{Int}}{e}{\textbf{Int}})}{e}{\textbf{Int}}}
+    {\iota}
+$$
+but nothing stops us from applying some pure function in this place.
+On the other hand, it would be undesirable if we could supply a term expecteing
+a pure function and with an effectful one.
+Clearly this property gives us flexibility, while keeping effects under control.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Parametricity}
+Our type system maintains predicative prenex polymorphism of ML, extended with universal quantification over effects because original paper maintains it.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Principal type}
+In ML type system, the \textit{principal type} property states that there exists a \textit{most general} type for any correct program\cite{principal}. 
+A type scheme $\pi$ is called \textit{principal} if any other type that could be given to $e$ is an \textit{instantiaton} of it.
+For example, consider $e = \lam x$. There's a few types that could be given to it: $\arrow{\textbf{Int}}{}{\textbf{Int}}$, 
+but clearly any correct type we would think of would not be more general than $\forall \alpha . \arrow{\alpha}{}{\alpha}$.
+
+In our type system, $\pi$ is a principal type of $e$ in environments $\Gamma$, $\Theta$ if
+$$ \types{e}{\pi}{\iota} \quad\wedge\quad
+    \forall \pi'.\: \types{e}{\pi'}{\iota} \implies
+    \forall \vec{\tau}.\: \exists \vec{\tau'}.\:
+    \pi[\vec{\tau} / \vec{\alpha}] <: \pi'[\vec{\tau'} / \vec{\alpha'}]
+$$
+For details about subtyping and principal type, see \hyperlink{chapter.6}{future work}.
+For now we will give an example of how to approximate principal type.
+Consider function composition, expressed in our calculus as term
+$\textit{compose} = \lam[f]\lam[g]\lam f (g\:x) $ in empty environment, and two type schemes that could be assigned to it:
+\begin{align*}
+    \pi_1\Coloneqq  \forall\alpha,\beta. &\:
+    \arrow{(\arrow{\tau_b}{\alpha}{\tau_c})}{}{
+        \arrow{(\arrow{\tau_a}{\beta}{\tau_b})}{}{
+                \arrow{\tau_a}{\alpha \circ \beta}{\tau_c}}} 
+    \\
+    \pi_2\Coloneqq  \forall\gamma      . &\:
+    \arrow{(\arrow{\tau_b}{\gamma}{\tau_c})}{}{
+        \arrow{(\arrow{\tau_a}{\gamma}{\tau_b})}{}{
+                \arrow{\tau_a}{\gamma}{\tau_c}}} 
+\end{align*}
+
+At first glance, it may look like $\pi_1$ is the ``correct'' type for \textit{compose}, as it seems more natural,
+ i.e. given functions $f$ causing effect $\varepsilon_f$, and $g$ causing $\varepsilon_f$, $\textit{compose}\:f\:g$
+is a function that would apply them both, so it clearly must be causing effect $\varepsilon_f \circ \varepsilon_g$.
+
+While this reasoning is sound, we are interested in deriving the most concise type possible. Let's see if there exists $\varepsilon_h$ such that $\pi_1$ instantiated with arbitrary effects $\varepsilon_f$, $\varepsilon_g$ subtypes $\pi_2$ instantiated with $\varepsilon_h$:
+\begin{align*}
+    \pi_1[\varepsilon_f, \varepsilon_g / \alpha, \beta] <: & \: \pi_2 [\varepsilon_h / \gamma]
+    \\ \iff \\ 
+    \arrow{(\arrow{\tau_b}{\varepsilon_f}{\tau_c})}{}{
+        \arrow{(\arrow{\tau_a}{\varepsilon_g}{\tau_b})}{}{
+                \arrow{\tau_a}{\varepsilon_f \circ \varepsilon_g}{\tau_c}}} <: & \:
+    \arrow{(\arrow{\tau_b}{\varepsilon_h}{\tau_c})}{}{
+        \arrow{(\arrow{\tau_a}{\varepsilon_h}{\tau_b})}{}{
+                \arrow{\tau_a}{\varepsilon_h}{\tau_c}}}
+    \\ \iff \\ 
+    \varepsilon_h <: \varepsilon_f          \;\wedge\; 
+    \varepsilon_h <: &  \: \varepsilon_g    \;\wedge\; 
+    \varepsilon_f \circ \varepsilon_g <: \varepsilon_h
+\end{align*}
+Clearly, $\pi_1[\varepsilon_f, \varepsilon_g / \alpha, \beta] <: \pi_2 [\varepsilon_h / \gamma]$
+does not hold for $\varepsilon_f$ and $\varepsilon_g$ other than $\iota$, thus $\pi_1$ cannot be a principal type of $e$.
+On the other hand, if we were to check if for arbitrary $\varepsilon_h$ there exist $\varepsilon_f$ and $\varepsilon_g$ such that
+$\pi_2 [\varepsilon_h / \gamma] <: \pi_1[\varepsilon_f, \varepsilon_g / \alpha, \beta]$, we would need to find witnesses for such formula:
+$$ \varepsilon_f <: \varepsilon_h          \;\wedge\; 
+    \varepsilon_g <: \varepsilon_h    \;\wedge\; 
+     \varepsilon_h <: \varepsilon_f \circ \varepsilon_g $$
+Clearly if we choose $ \varepsilon_f = \varepsilon_g = \varepsilon_h$, it is satisfied, which means that $\pi_2$ is indeed more general $\pi_1$.
+We designed our inference algorithm with this intuition in mind and $\pi_2$ is the desired result that our implementation actually infers.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Inference algorithm}
+
+
+The algorithm we present loosely follows original \textit{Algorithm} $\mathbb{W}$, executing in two distinct phases:
+\begin{enumerate}
+    \item Constraint gathering: the algorithm traverses expression's \textit{AST}, generating sub-expressions' types, effects and constraints,
+    \item Constraint solving: the algorithm builds a substitution that satisfies all the constraints, while generating the most general type.
+\end{enumerate}
+In practice, the phases are often interleaved, as even in pure \textit{let-polymorphism} type interference when handling expression $\textbf{let } x = e_1 \textbf{ in } e_2$  we need to solve constraints regarding the inferred type of $e_1$, so we can \textit{generalize} it before adding it to the environment.
+
+We chose to present  $\vdash_\textbf{Gen}$ typing rules as close as possible
+to the practical inference algorithm.
+Hence, we heavily use \textit{unification variables}
+(denoted $t$ for types and $\epsilon$ for effects) 
+and the rules are somewhat \textit{algorithmic}, meaning the focus shifts from \textit{checking} to \textit{obtaining} a type.
+If we think about effects as sets of instances,
+then the subtyping relation of effects simply boils down to set inclusion.
+
+\section{Remarks on effect unification}
+With combining effect \textit{unification variables} and constraint solving, a problem arises.
+Consider constraint $a <: \epsilon_1 \circ \epsilon_2$,
+for some instance variable $a$ and some effect unification variables $\epsilon_1$, $\epsilon_2$.
+To resolve such constraint we have a few viable options:
+\begin{enumerate}
+    \item Expand $\epsilon_1$ with $a$.
+    \item Expand $\epsilon_2$ with $a$.
+    \item Expand both $\epsilon_1$ and $\epsilon_2$ with $a$.
+\end{enumerate}
+But how would we choose one over the other? Maybe one of those makes the program ill-typed, while the other does not? What if there's more than two unification variables? Clearly such constraints are undesirable.
+
+To tackle this problem, in our algorithm we permit no more than one effect
+\textit{unification variable} or \textit{quantified variable} in effects.
+Thus the effects are defined differently than in Chapter 1:
+\begin{align*} 
+    \textbf{effects} \ni \varepsilon & \Coloneqq
+    I \mid 
+    I * \alpha \mid 
+    I * \epsilon  &  \text{(effects)}
+\\
+    I & \Coloneqq \iota \mid \{a\} \mid I \cup I \mid I \setminus I
+    \quad & \text{(sets of instances)}
+\end{align*}
+So an effect is either just a finite set of instances, or a union of one with either effect \textit{unification variable} or \textit{generalized} effect variable,.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Generating constraints}
+As in \textit{algorithm} $\mathbb{W}$, in order to infer type for given term,
+we build it by working bottom-up from the leaves through the whole expression tree.
+To this end, we have defined judgement $\gens{e}{\tau}{\varepsilon}{C}{S}$ that
+states in the the premise what conditions need to be satisfied for deducing type, 
+and under what constraints $C$ and substitution $S$ we shall interpret it.
+
+Judgement $\vdash_{Gen}$ is constructed in a very \textit{algorithmic} way, meaning the focus shifts from \textit{checking} typing derivation to \textit{gathering} constraints and type.
+$$
+ \textbf{constraints} \ni C \Coloneqq
+    \emptyset \mid \{\tau <: \tau\} \mid \{\varepsilon <: \varepsilon\} \mid C \cup C 
+$$
+
+A substitution is a mapping from type and effect \textit{unification variables} to
+inferred types or effects, respectively.
+$$
+ \textbf{substitution} \ni S \Coloneqq
+    {id} \mid [t \mapsto \tau] \mid [\epsilon \mapsto \varepsilon] \mid S \circ S \mid 
+$$
+We will write $S[t \mapsto \tau]$ for $[t\mapsto \tau] \circ S$.
+Substitution $id$ is simply an identity function.
+
+We treat this $\vdash_\textbf{Gen}$ judgement as a set of rules for
+\textit{generating} types and constraints (working bottom-up) rather than
+a type checker ($\vdash$ working top-down).
+Ideally, for any term $e$ we would like to have that generation would implies syntactic type soundness
+$$
+\gens{e}{\tau}{\varepsilon}{C}{S} \implies
+\operatorname{solve}(\Gamma, C, S) = \emptyset; S' \implies
+\types[S'\Gamma;S'\Theta]{e}{S'\tau}{S'\varepsilon}
+$$
+We do not prove it in this work, but leave it for \hyperlink{chapter.6}{future work}.
+
+We abstract solving constraints $C$ in environment $\Gamma$ (under substitution $S$) to
+a high-level function \textit{solve}, which returns a reduced set of constraints $C'$ and
+a new substitution $S'$.
+
+%%%% GENERATIVE JUDGEMENT %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\setlength{\jot}{12pt}
+\begin{gather*}
+\begin{gathered}
+    \inference {}{\gens{()}{\textbf{Unit}}{\iota}{\emptyset}{S_{id}}}
+    \qquad
+    \inference {}{\gens{n}{\textbf{Int}}{\iota}{\emptyset}{S_{id}}} {}
+\\
+    \inference {
+        (x : \pi) \in \Gamma & \operatorname{inst}(\pi) = \tau
+    }{
+        \gens{x}{\tau}{\iota}{\emptyset}{S_{id}}
+    }
+    \qquad
+     \inference{
+        \gens[\Gamma, (x : t); \Theta]{e}{\tau}{\varepsilon}{C}{S} &
+        \fresh{t}
+    }{
+        \gens{\lam e}{\arrow{t}{\varepsilon}{\tau}}{\iota}{C}{S}
+    }
+\\
+    \inference{
+        \gens[\Gamma, (f : \arrow{t_1}{\epsilon}{t_2}),(x : t_1); \Theta]{e}{\tau}{\varepsilon}{C}{S} &
+        \fresh{t_1} &
+        \fresh{\epsilon} &
+        \fresh{t_2}
+    }{
+        \gens{\textbf{fun } f x . e}{\arrow{t_1}{\epsilon}{t_2}}{\iota}
+        {C \cup \{\arrow{t_1}{\varepsilon}{\tau} <: \arrow{t_1}{\epsilon}{t_2} \}}{S}
+    }
+\\
+\inference{
+    \gens{e_1}{\tau_1}{\varepsilon_1}{C_1}{S_1} &
+    \gens[S_1\Gamma;S_1\Theta]{e_2}{\tau_2}{\varepsilon_2}{C_2}{S_2} &
+    \fresh{t} &
+    \fresh{\epsilon}
+}{
+    \gens{e_1\:e_2}{t}{\epsilon}{
+    C_1 \cup C_2 \cup \{\varepsilon_1 <: \epsilon ,
+    \varepsilon_2 <: \epsilon, \tau_1 <: \arrow{\tau_2}{\epsilon}{t} \}}{S_2  S_1}
+}
+\\
+\inference{
+    \gens{e_1}{\tau_1}{\varepsilon_1}{C_1}{S_1} &
+    \operatorname{solve}(\Gamma,\tau_1/\varepsilon_1, C_1, S_1) =  C; S \\
+    S \varepsilon_1 = \iota &
+    \operatorname{gen}(S\Gamma, S\tau_1) = \pi &
+    \gens[S\Gamma,(x:\pi);S\Theta]{e_2}{\tau_2}{\varepsilon_2}{C_2}{S_2}
+}{
+    \gens{\textbf{let } x = e_1 \textbf{ in } e_2}{\tau_2}{\varepsilon_2}{C\cup C_2}{S_2 \circ S}
+}
+\\
+\inference{
+    \gens{e_1}{\tau_1}{\varepsilon_1}{C_1}{S_1} &
+    \operatorname{solve}(\Gamma,\tau_1/\varepsilon_1, C_1, S_1) =  C; S \\
+    S \varepsilon_1 \neq \iota &
+    S \tau_1 = \tau &
+    \gens[S\Gamma,(x:\tau);S\Theta]{e_2}{\tau_2}{\varepsilon_2}{C_2}{S_2} &
+    \fresh{\epsilon}
+}{
+    \gens{\textbf{let } x = e_1 \textbf{ in } e_2}{\tau_2}{\epsilon}{C\cup C_2
+    \cup \{ \varepsilon_1 <: \epsilon, \varepsilon_2 <: \epsilon\}}{S_2 \circ S}
+}
+\\
+\inference{
+    \gens[\Gamma; \Theta, (a : \sigma)]{e}{\tau}{\varepsilon}{C'}{S'} \\
+    \operatorname{solve'}(\Gamma, C', S') = C; S &
+    S \varepsilon = \iota &
+    S \tau' = \tau
+}{
+    \gens{\lambda (a : \sigma). e}{\forall (a : \sigma) . \tau}{\iota}{C}{S}
+}
+\\
+\inference{
+    \gens{e}{\tau'}{\varepsilon}{C'}{S'} &
+    \operatorname{solve'}(\Gamma, C', S') = C; S  \\
+    S \tau' = \forall (a : \sigma) . \tau &
+    S \varepsilon = \iota &
+    (b:\sigma) \in S\Theta
+}{
+    \gens{e\:b}{\tau[b/a]}{\iota}{C}{S}
+}
+\\
+\inference{
+    \Theta \vdash op_a : \tau_1 \Rightarrow \tau_2 &
+    \gens{e}{\tau_e}{\varepsilon}{C}{S}
+}{
+    \gens{op_a \: e}{\tau_2}{a \circ \varepsilon}{C \cup \{\tau_e <: \tau_1 \}}{S}
+}
+\\
+% \inference{
+%     \gens{e}{\textbf{Unit}}{\varepsilon}{C} & a : {\textbf{State } \tau} \in \Theta
+% }{
+%     \gens{\textbf{Get}_a \: e}{\tau}{a \circ \varepsilon}{C}
+% }
+% \\
+% \inference{
+%     \gens{e}{\tau}{\varepsilon}{C} & a : {\textbf{State } \tau} \in \Theta
+% } {
+%     \gens{\textbf{Put}_a \: e}{\textbf{Unit}}{a \circ \varepsilon}{C}
+% }
+%\\
+\inference{
+\gens{h}{\sigma \triangleright t}{\epsilon}{C_h}{S_h} &
+\gens[S_h\Gamma; S_h\Theta, (a:\sigma)]{e}{\tau}{\varepsilon}{C_e}{S_e} \\
+\gens[S_h S_e \Gamma,(x:\tau); S_h S_e \Theta]{e_r}{\tau_r}{\varepsilon_r}{C_r}{S_r} & 
+\fresh{t} & \fresh{\epsilon} \\
+C = C_h \cup C_e \cup C_r \cup\{\varepsilon <: a * \epsilon, \tau_r <: t, \varepsilon_r <: \epsilon \} &
+S = S_r \circ S_e \circ S_h
+}{
+\gens{\textbf{handle}_a \: e\: \{h;\textbf{return } x. e_r\}}{t}{\epsilon}{C}{S}
+}
+\end{gathered}
+\end{gather*}
+And now typing handlers:
+\begin{gather*}
+\begin{gathered}
+\inference{ 
+\gens[\Gamma,(x:\textbf{Unit}), (k:\arrow{t}{\varepsilon}{\tau});\Theta]{e}{\tau_\textbf{Raise}}{\varepsilon_\textbf{Raise}}{C}{S} &
+\fresh{t}
+}{
+\gens{ [(\textbf{Raise}, x, k. e)]}{\textbf{Error}\triangleright \tau}{\varepsilon}{C\cup\{\tau_\textbf{Raise} <: \tau, \varepsilon_\textbf{Raise} <: \varepsilon\}}{S}
+}
+\\
+\inference{
+\gens[\Gamma,(x:\textbf{Unit}), (k:\arrow{\tau'}{\varepsilon}{\tau});\Theta] 
+{e_\textbf{Get}}{\tau_\textbf{Get}}{\varepsilon_\textbf{Get}}{C_\textbf{Get}}{S_\textbf{Get}}
+\\
+\gens[S_\textbf{Get}\Gamma,(x:\tau'), (k:\arrow{\textbf{Unit}}{\varepsilon}{\tau});S_\textbf{Get} \Theta]
+{e_\textbf{Put}}{\tau_\textbf{Put}}{\varepsilon_\textbf{Put}}{C_\textbf{Put}}{S_\textbf{Put}} \\
+C = C_\textbf{Get} \cup \{ \tau_\textbf{Get} <: \tau,  \varepsilon_\textbf{Get} <: \varepsilon \}
+\cup C_\textbf{Put} \cup \{ \tau_\textbf{Put} <: \tau,  \varepsilon_\textbf{Put} <: \varepsilon \}
+}{
+\gens{ [(\textbf{Get}, x, k. e_\textbf{Get});(\textbf{Put}, x, k. e_\textbf{Put})]}{\textbf{State }\tau'\triangleright \tau}{\varepsilon}{C}{S_\textbf{Put} \circ S_\textbf{Get}}
+}
+\end{gathered}
+\end{gather*}
+\setlength{\jot}{3pt}
+
+
+It is important that we ``return'' not only constraints but a substituion also becouse
+some constraints may have been already resolved in the subtree of term
+and we need to take it into account. For example, consider term
+$$
+\lam \textbf{let } y = x\:1 \textbf{ in } y
+$$
+// draw subtree
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Solving constraints}
+The constraint solving algorithm we present is divided in two sub-procedures:
+\begin{enumerate}
+    \item \texttt{solve\_simple\_contraints} $C$ $S$\\
+    deals with both type- and effect-constraintsm behaving like ordinary HM algorithm in its' simplest form. As the rules for type subtyping are somewhat trivial, it can solve them efficiently and environment-agnostically. As we explain in following subsection, there are some effect constraints that are \textit{non-trivial} and cannot be resolved so easily, so they are dealt with by the second procedure:
+    
+    \item \texttt{solve\_contraints\_within} $\Gamma$ $(\tau, \varepsilon)$ $C$ $S$ \\
+    deals with effect-constraints regarding effect unification variables ($\epsilon$) occuring in $\Gamma$, $\tau$ and $\varepsilon$.
+    The interesting constrains are of form $\epsilon_1 <: I * \epsilon_2$,
+    as there are many substitions that could satisfy one such constraint, but it is not obvious which one is \textit{best} regarding bigger picture.
+    In following subsections we argue how our approach approximates the most general type.
+    For formal methods, see \hyperlink{chapter.6}{future work}.
+\end{enumerate}
+
+\subsection{Simple constraints}
+We call constraints solved by the first sub-procedure \textit{simple} as the substitution they induce is \textit{minimal}, meaning it is unambiguous that their premises \textit{must} hold for the whole to be correct. Constrains \textit{irreducible} by \texttt{solve\_simple\_contraints} are of form $\epsilon_1 <: I * \epsilon_2$; other constraints are either solved or reduced to the \textit{interesting} form.
+
+\begin{lstlisting}
+let expand $\epsilon$ $I$ $S$= 
+  if $I = \emptyset$ then $S$
+  else $S[\epsilon \mapsto I * \epsilon']$ where $\fresh{\epsilon'}$
+\end{lstlisting}
+\begin{lstlisting}
+let solve_simple $C$ $S$ = 
+  match $C$ with
+  | $\emptyset$        $\rightarrow$ $\emptyset; S$
+  | $\{\tau_1 <: \tau_2\} \cup C$ $\rightarrow$
+    match $S[\tau_1], S[\tau_2]$ with
+    | $\tau_1'$, $\tau_2'$ when $\tau_1' = \tau_2'$ $\rightarrow$
+      solve_simple $C$ $S$
+    | $t$, $\tau$
+    | $\tau$, $t$ $\rightarrow$
+      solve_simple $C$ $S[t \mapsto \tau]$
+    | $\arrow{\tau_1'}{\varepsilon_1}{\tau_1''}, \arrow{\tau_2'}{\varepsilon_2}{\tau_2''}$ $\rightarrow$
+      solve_simple $\{\tau_1' <: \tau_2', \varepsilon_1 <: \varepsilon_2, \tau_1'' <: \tau_2''\}\cup C$ $S$
+  | $\{\varepsilon_1 <: \varepsilon_2\} \cup C$ $\rightarrow$
+    match $S[\varepsilon_1], S[\varepsilon_2]$ with
+    | $\iota$, _ $\rightarrow$ solve_simple $C$ $S$
+    | $I_1$, $I_2$ 
+    | $I_1$, $I_2 * \epsilon$ $\rightarrow$
+      solve_simple $C$ (expand $(I_1 \setminus I_2)$ $\epsilon$ $S$)
+    | $I_1 * \epsilon_1$, $I_2 * \epsilon_2$ $\rightarrow$
+      if $\epsilon_1 = \epsilon_2$ then solve_simple $C$ (expand $(I_1 \setminus I_2)$ $\epsilon_2$ $S$)
+      else let $C';S'$ = solve_simple $C$ (expand $(I_1 \setminus I_2)$ $\epsilon_2$ $S$) 
+            in $\{\epsilon_1 <: I_2 * \epsilon_2\}\cup C'; S'$
+    | $I_1 * \epsilon <: I_2$ when $I_1 \subseteq I_2$$\rightarrow$
+      let $C';S'$ = solve_simple $C$ $S$ 
+        in $\{\epsilon <: I_2\}\cup C'; S'$
+\end{lstlisting}
+
+We can now define function $\operatorname{solve'}$ from $ \vdash_\textbf{Gen} $ relation:
+$$ \operatorname{solve'}(C, S) = \texttt{solve\_simple}\:C\:S $$ 
+
+\subsection{Interesting constraints}
+What makes constraints like $(\epsilon_1 <: I_2 * \epsilon_2)$ interesting is that there are many
+plausible substitutions that satisfy it.
+For every set of instances $I_1 \subseteq I_2$, substitution $\{\epsilon_1 := I_1\}$ or 
+$\{\epsilon_1 := I_1 * \epsilon_2\}$ obviously resolves the constraint, but clearly some substitutions are better than others. 
+
+As discussed in previous chapter, $\rightarrow$ type constructor is contravariant to subtyping relation, which plays a great role in how we treat effect unification variables.
+During computation of \texttt{solve\_constraints\_within} $\Gamma$ $\tau/\varepsilon$ we keep information about $variance$ of effect unification variables as a function $V$.
+$$\textbf{variance} \ni v \Coloneqq \oplus \mid \odot \mid \ominus \mid \times$$
+If variable $\epsilappear$ appears in $\Gamma$, $\tau$, and $\varepsilon$ only in \textit{covariant} (\textit{positive}) positions, then $V(\epsilon) = \oplus$.
+If it appears only \textit{covariantly} (\textit{negatively}) then$V(\epsilon) = \ominus$. If it appears \textit{invariantly} (\textit{both} positively and negatively), then $V(\epsilon) = \odot$. Finally, if $\varepsilon$ doesn't appear in type or environment at all, then $V(\epsilon) = \times$.
+
+Because of the way we defined subtyping relation, we can \textit{shrink} any covariant effect and \textit{expand} any contravariant effect.
+Consider type $\tau$ with some covariant effect $\varepsilon_\oplus$.
+Clearly, for any $\varepsilon_\oplus' <: \varepsilon_\oplus$ we have
+$$ \tau[\varepsilon_\oplus' / \varepsilon_\oplus] <: \tau $$
+Analogously, for any contravariant effect $\varepsilon_\ominus$ and 
+any effect $\varepsilon_\ominus'$ such that $\varepsilon_\ominus <: \varepsilon_\ominus'$
+we have
+$$ \tau[\varepsilon_\ominus' / \varepsilon_\ominus] <: \tau$$
+
+It is important to include the non appearing variables in our algorithm as well, as there are many unification variables that are generated along the way that do not appear explicetly, but often do form \textit{chains} of subtyping constraints like
+$$\epsilon_\ominus <: \epsilon_1 <: \dots <: \epsilon_n <: \epsilon_\oplus \text{ where } V(\epsilon_i) = \times$$
+In such case, we want $\epsilon_\ominus$ to be \textit{the biggest} and $\epsilon_\oplus$ to be \textit{the smallest} possible, so we would like to deduce the substitution
+$$\epsilon_\ominus = \epsilon_1 = \dots = \epsilon_n = \epsilon_\oplus$$
+as it guarantees that it is in fact the case.
+
+Sketch of algorithm:
+
+\begin{lstlisting}
+solve_contraints_within $\Gamma$ $\tau/ \varepsilon$ $C$ $S$ =
+  $V :=$ gather_free_vars $S\Gamma$ $S\tau/S\varepsilon$
+  while $\exists (I_1 * \epsilon_1 <: I_2 * \epsilon_2) \in S\:C.\: \epsilon_1 \neq \epsilon_2 \wedge V(\epsilon_1), V(\epsilon_2)$ matches
+      | $\times,\oplus$ | $\ominus,\times$ | $\times,\odot$ | $\odot,\times$
+      | $\oplus,\oplus$ | $\ominus,\ominus$ | $\odot,\odot$ $\rightarrow$
+          $C := C \setminus \{ I_1 * \epsilon_1 <: I_2 * \epsilon_2 \}$;
+          $S := S[\epsilon_1 \mapsto I_2 * \epsilon_2]$;
+      | $\ominus,\oplus$ | $\ominus,\odot$ | $\odot,\oplus$ $\rightarrow$
+          $C := C \setminus \{I_1 * \epsilon_1 <: I_2 * \epsilon_2 \}$;
+          $S := S[\epsilon_1 \mapsto I_2 * \epsilon_2]$;
+          $V := V[\epsilon_2 \mapsto \odot]$
+  for $(\epsilon, \oplus) \in V$:
+      $S := S[\epsilon\mapsto\iota]$
+  return $C,S$
+\end{lstlisting}
+
+Finally, we can define function $\operatorname{solve'}$ from $ \vdash_\textbf{Gen} $:
+\begin{gather*}\begin{aligned}
+\operatorname{solve}(\Gamma, \tau/\varepsilon, C, S) = 
+    \texttt{solve\_constraints\_within}\;\Gamma\;\tau / \varepsilon\;& C'\;S' \\
+    \textit{where } S', C' = \texttt{solve\_simple}\;& C\:S 
+\end{aligned}
+\end{gather*}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Illustrative example}
+As now we know how \textit{solve} functions work, let's take a look how constraints for term would be generated and resolved.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Implementation}
+Pure OCaml.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Representation}
+How calculus, type system, constraints and substitution are implemented.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Project structure}
+Which code does what
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Tutorial}
+Some examples and how to run it.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Future work}
+Let-polymorhpism allows us to omit implicit type-lambdas
+(usually denoted by $\Lambda$) and type instantiation, making programmers'
+lives easier.
+Way of doing so for instance lambdas is yet to be found.
+
+Ensuring that the infered type is principal would most probably require a long
+and difficult proof. The way we resolve effect constraints is also a heuristic
+and not a formal method. Such constraints form a graph which topology should be
+studied with according depth. There are works by Francois that do this in different
+subtyping relation.
+
+Finally, resolving constraints \textit{formally} would require us to study
+the topology of graphs constructed.
+Such constraints form a partially ordered set and finding \textit{formally sound}
+substitution that satisfies it is beyond this work, so we present
+a  \textit{heuristic} approach, which produces desired results for all the examples we tried.
+However, it may be possible that there is type and constraint set that our method
+fails to generate the \textit{most general} type, but given short time window for
+this work we were not able to find such example.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%% BIBLIOGRAFIA
+
+\begin{thebibliography}{1}
+\bibitem{binders-labels}
+    Dariusz Biernacki, Maciej Piróg, Piotr Polesiuk, and Filip Sieczkowski. 2019. Binders by day, labels by night: effect instances via lexically scoped handlers. \textit{Proc. ACM Program. Lang.} 4, POPL, Article 48 (January 2020), 29 pages. \url{https://doi.org/10.1145/3371116}
+\bibitem{emlti}
+    Pottier François and Didier Rémy. 2005.
+    The Essence of ML Type Inference.
+    MIT press, Chapter 10 of \textit{Advanced topics in types and programming languages}.
+\bibitem{principal}
+    Luis Damas and Robin Milner. 1982. Principal type-schemes for functional programs. In \textit{Proceedings of the 9th ACM SIGPLAN-SIGACT symposium on Principles of programming languages} (\textit{POPL '82}). Association for Computing Machinery, New York, NY, USA, 207–212. \url{https://doi.org/10.1145/582153.582176}
+\bibitem{milner}
+    Robin Milner,
+    A theory of type polymorphism in programming,
+    Journal of Computer and System Sciences,
+    Volume 17, Issue 3,
+    1978,
+    Pages 348-375,
+    ISSN 0022-0000,
+     \url{https://doi.org/10.1016/0022-0000(78)90014-4}.
+\bibitem{hindley}
+    J. Roger Hindley. 1969. The Principal Type-Scheme of an Object in Combinatory Logic. Transactions of the American Mathematical Society, 146, 29-60. \url{https://doi.org/10.2307/1995158}
+
+
+    
+\end{thebibliography}
+
+\end{document}
