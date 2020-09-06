@@ -72,21 +72,37 @@
 %%%%% POCZĄTEK ZASADNICZEGO TEKSTU PRACY %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Introduction}
 
-Type inference is a process of generating types for expression. 
-It is present in many mainstream programming languages in some form or other.
-Most popular type inference algorithm, called $\mathbb{W}$ was presented by Milner\cite{milner}
-and is the basis for type inference present in most of the statically typed
+Programming languages that enjoy \textit{static type safety} require that
+each variable and expression is given a \textit{type}.
+Assigning values to variables of different types usually results in a compile error.
+
+Type inference method was designed to aid the process of \textit{type-checking}
+and to ease the lives of programmers. It is a process of \textit{deducing}
+the type of an expression, by the analysis of its structure and the environment
+in which we carry out the inference process. 
+It is present in many mainstream programming languages in some form or another.
+For example, in programming language $C\sharp$ programmers may omit
+the type of declared variables by using the keyword \texttt{var} in place of
+type.
+
+A \textit{complete} type inference system can deduce a type for every
+expression without the need for any type annotations.
+Most popular such type system, called \textit{Hindley-Milner} is based on the
+works of J. Roger Hindley\cite{hindley},
+Robin Milner, who presented \textit{the} type inference algorithm $\mathbb{W}$\cite{milner},
+and Luis Damas\cite{principal}.
+Their work is a corner stone of type theory for programming languages
+and the basis for type systems and type inference present in most of the statically typed
 functional programming languages.
 
-Type systems like System-F or Hindley-Milner's, based on the textit{lambda calculus}
+Type systems like System-F or Hindley-Milner's, based on the \textit{lambda calculus}
 are great mathematical models of describing pure computations and types of pure terms concisely.
-But, real-life programs heavily use side effects.
-Be it writing to memory, performing I/O or mutating state, and those systems cannot express them.
-
+Yet, a lot of real-life programs heavily use side effects,
+be it writing to memory, performing I/O actions, or mutating state, and those systems cannot express them.
 There are different ways of describing side effects in both scientific literature
 and real world implementations of programming languages.
 Some languages do not restrict side effects, like OCaml,
-some have their unique way of expressing side effects, like Haskell and its monadic actions.
+and some have their unique ways of expressing side effects, like Haskell and its monadic actions.
 Finally there are so called type-and-effect systems.
 
 The particular system presented by Biernacki et al\cite{binders-labels} uses \textit{algebraic effects} to describe
