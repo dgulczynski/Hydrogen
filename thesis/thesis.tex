@@ -731,14 +731,16 @@ The constraint solving algorithm we present is divided in two sub-procedures:
     
     \item \texttt{solve\_contraints\_within} $\Gamma$ $(\tau, \varepsilon)$ $C$ $S$ \\
     deals with effect-constraints regarding effect unification variables ($\epsilon$) occurring in $\Gamma$, $\tau$ and $\varepsilon$.
-    The interesting constrains are of form $\epsilon_1 <: I * \epsilon_2$,
+    The interesting constrains are of form $\{\epsilon_1 <: I * \epsilon_2\}$,
     as there are many substations that could satisfy one such constraint, but it is not obvious which one is \textit{best} regarding bigger picture.
     In following subsections we argue how our approach approximates the most general type.
     For formal methods, see \hyperlink{chapter.6}{future work}.
 \end{enumerate}
 
 \subsection{Simple constraints}
-We call constraints solved by the first sub-procedure \textit{simple} as the substitution they induce is \textit{minimal}, meaning it is unambiguous that their premises \textit{must} hold for the whole to be correct. Constrains \textit{irreducible} by \texttt{solve\_simple} are of form $\epsilon_1 <: I * \epsilon_2$; other constraints are either solved or reduced to the \textit{interesting} form.
+We call constraints solved by the first sub-procedure \textit{simple} as the substitution they induce is \textit{minimal},
+meaning it is unambiguous that their premises \textit{must} hold for the whole to be correct. Constrains that are \textit{interesting} are \textit{irreducible} by \texttt{solve\_simple}.
+Other constraints are either solved or reduced to the \textit{interesting} form.
 
 \begin{lstlisting}
 let expand $\epsilon$ $I$ $S$= 
@@ -812,7 +814,7 @@ $S\epsilon_\ominus = S\epsilon_1 = \dots = S\epsilon_n = S\epsilon_\oplus$,
 as it guarantees that it is in fact the case.
 
 \begin{lstlisting}
-solve_contraints_within $\Gamma$ $\tau/ \varepsilon$ $C$ $S$ =
+solve_within $\Gamma$ $\tau/ \varepsilon$ $C$ $S$ =
   $V :=$ gather_free_vars $S\Gamma$ $S\tau/S\varepsilon$
   while $\exists (I_1 * \epsilon_1 <: I_2 * \epsilon_2) \in S\:C.\: \epsilon_1 \neq \epsilon_2 \wedge V(\epsilon_1), V(\epsilon_2)$ matches
       | $\times,\oplus$ | $\ominus,\times$ | $\times,\odot$ | $\odot,\times$
@@ -832,14 +834,85 @@ We conclude the description of algorithm by
 defining function \textit{solve} from $\vdash_\textbf{Gen}$:
 \begin{gather*}\begin{aligned}
 \operatorname{solve}(\Gamma, \tau/\varepsilon, C, S) = 
-    \texttt{solve\_constraints\_within}\;\Gamma\;\tau / \varepsilon\;& C'\;S' \\
+    \texttt{solve\_within}\;\Gamma\;\tau / \varepsilon\;& C'\;S' \\
     \textit{where } S', C' = \texttt{solve\_simple}\;& C\:S 
 \end{aligned}
 \end{gather*}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Illustrative example}
-No what we have a complete picture of how the inference algorithm works, let's take a look how constraints for term would be generated and resolved.
+No what we have a complete picture of how the inference algorithm works, let's take a look how constraints for this complicated term would be generated and resolved.
+
+\begin{gather*}
+\begin{aligned}
+  & \textbf{let } compose = \lam[f]\lam[g]\lam f\ (g\ x) \textbf{ in}
+  \\
+  & \textbf{let } update = \lam[(s:\textbf{State }t)] \textbf{Put}_s (f\ (\textbf{Get}_s\ ()))\textbf{ in}
+  \\
+  & \textbf{handle}_a \\
+  & \quad \textbf{handle}_e \\
+  & \qquad (\lam \textbf{Raise}_e\ x) ((update\ a) (compose\  (\lam 21)\ (\lam x))) \\
+  & \quad \{[(\textbf{Raise}\ (),\  k.\ 37)] ; \textbf{return }x.\ x\} \\
+  & \{[(\textbf{Get} (),\  k.\ \lam[c] k c c) ; (\textbf{Put }v\ k.\ \lam[c] (k ()) v) ] ; \textbf{return }.\ \lam[c] x\}
+\end{aligned}
+\end{gather*}
+We will begin by inferring type for \textit{compose}
+$$
+\inference{
+ \inference{
+  \inference{
+     \inference{
+          \inference{}{\gens[\Gamma]{f}{t_f}{\iota}{\emptyset}{id}}
+       \\
+     \inference
+      {
+         \inference{}{\gens[\Gamma]{g}{t_g}{\iota}{\emptyset}{id}}
+         &
+         \inference{}{\gens[\Gamma]{x}{t_x}{\iota}{\emptyset}{id}} 
+      }{
+         \gens[\Gamma]{(g\ x)}{t_1}{\epsilon_1}{\{\iota <: \epsilon_1, \iota <: \epsilon_1, t_g <: \arrow{t_x}{\epsilon_1}{t_1}\}}{id}
+      } \\
+      C_1 = \{
+            \iota <: \epsilon_1, \iota <: \epsilon_1, t_g <: \arrow{t_x}{\epsilon_1}{t_1}, 
+            \iota <: \epsilon_2, \epsilon_1 <: \epsilon_2, t_f <: \arrow{t_1}{\epsilon_2}{t_2}
+        \}
+     }{
+     \Gamma = (f:t_f),(g:t_g),(x:t_x)
+     \quad 
+     \gens[\Gamma]{f\ (g\ x)}{t_2}{\epsilon_2}{C_1}{id}
+    }
+   }{
+    \gens[(f:t_f),(g:t_g)]{\lam f\ (g\ x)}{\arrow{t_x}{\epsilon_2}{t_2}}{\iota}{C_1}{id}
+   }
+  }{
+  \gens[(f:t_f)]{\lam[g]\lam f\ (g\ x)}{\arrow{t_g}{}{\arrow{t_x}{\epsilon_2}{t_2}}}{\iota}{C_1}{id}
+  }
+}{
+\gens[]{\lam[f]\lam[g]\lam f\ (g\ x)}{\arrow{t_f}{}{\arrow{t_g}{}{\arrow{t_x}{\epsilon_2}{t_2}}}}{\iota}{C_1}{id}
+}
+$$
+\begin{align*}
+  & \texttt{solve\_simple}\  C_1\ id = \\
+  & \texttt{  solve\_simple}\ \{
+            \epsilon_1 <: \epsilon_2,
+           t_g <: \arrow{t_x}{\epsilon_1}{t_1}, 
+           t_f <: \arrow{t_1}{\epsilon_2}{t_2}
+        \}\ id = \\
+  & \qquad \{\epsilon_1 <: \epsilon_2\} ; S_1 \text{ where }  S_1 = [t_g \mapsto \arrow{t_x}{\epsilon_1}{t_1}, t_f \mapsto \arrow{t_1}{\epsilon_2}{t_2}]
+\\ \\
+  & \texttt{solve\_within}\ \emptyset\
+    (\arrow{(\arrow{t_1}{\epsilon_2}{t_2})}{}{\arrow{(\arrow{t_x}{\epsilon_1}{t_1})}{}{\arrow{t_x}{\epsilon_2}{t_2}}})
+    \ \iota \ \{\epsilon_1 <: \epsilon_2\} \ S_1 = \\
+  & \quad V = [\epsilon_1 \mapsto \ominus, \epsilon_2 \mapsto \odot] ;\\
+  & \texttt{return } \emptyset ; S_1[\epsilon_1 \mapsto \epsilon_2]
+\\ \\
+& \operatorname{solve}(\emptyset, {\arrow{t_f}{}{\arrow{t_g}{}{\arrow{t_x}{\epsilon_2}{t_2}}}}/{\iota}, C_1, id) = 
+\\ & \quad \emptyset ; S_1[\epsilon_1 \mapsto \epsilon_2]
+\\ \\
+& \operatorname{gen}(\emptyset, \arrow{(\arrow{t_1}{\epsilon_2}{t_2})}{}{\arrow{(\arrow{t_x}{\epsilon_2}{t_1})}{}{\arrow{t_x}{\epsilon_2}{t_2}}}) = \\
+& \qquad \forall \alpha, \beta, \gamma, \delta .\ 
+\arrow{(\arrow{\alpha}{\delta}{\beta})}{}{\arrow{(\arrow{\gamma}{\delta}{\alpha})}{}{\arrow{\gamma}{\delta}{\beta}}}
+\end{align*}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Implementation}
