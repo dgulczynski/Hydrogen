@@ -544,6 +544,7 @@ Thus the effects are defined differently than in Chapter 1:
 So an effect is either just a finite set of instances, or a union of one with either effect \textit{unification variable} or \textit{generalized} effect variable.
 If we think about effects as sets,
 then the subtyping relation of effects simply boils down to set inclusion.
+Notice how every effect defined by the new grammar is expressible in the previous one as well.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Generating constraints}
@@ -856,7 +857,10 @@ No what we have a complete picture of how the inference algorithm works, let's t
   & \{[(\textbf{Get} (),\  k.\ \lam[c] k c c) ; (\textbf{Put }v\ k.\ \lam[c] (k ()) v) ] ; \textbf{return }.\ \lam[c] x\}
 \end{aligned}
 \end{gather*}
-We will begin by inferring type for \textit{compose}
+We will begin by inferring type for \textit{compose}:
+\textit{
+Rozpisywanie tego w ten sposób wygląda mało sensownie,
+lepiej pewnie byłoby rozpisać to w bardziej programistycznej formie, z wcięciami}
 $$
 \inference{
  \inference{
@@ -932,24 +936,33 @@ Some examples and how to run it.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Future work}
-Let-polymorhpism allows us to omit implicit type-lambdas
+Let-polymorphism allows us to omit implicit type-lambdas
 (usually denoted by $\Lambda$) and type instantiation, making programmers'
 lives easier.
 Way of doing so for instance lambdas is yet to be found.
 
-Ensuring that the infered type is principal would most probably require a long
-and difficult proof. The way we resolve effect constraints is also a heuristic
-and not a formal method. Such constraints form a graph which topology should be
-studied with according depth. There are works by Francois that do this in different
-subtyping relation.
+Ensuring that the inferred type is principal would most probably require a long
+and difficult proof.
 
-Finally, resolving constraints \textit{formally} would require us to study
-the topology of graphs constructed.
-Such constraints form a partially ordered set and finding \textit{formally sound}
-substitution that satisfies it is beyond this work, so we present
-a  \textit{heuristic} approach, which produces desired results for all the examples we tried.
+The way we resolve effect constraints is not a formally sound method.
+Presence of subtyping relation in type inference does not impose
+much added difficulty from the theoretical point of view,
+but it does make the practical constraint solving a much harder task.
+Because of this relation, constraints describing effects
+form a partially ordered set, and finding the \textit{formally sound}
+substitution that satisfies it, is beyond this work.
+
+A few works had been written on this topic, proving its difficulty,
+including the PhD thesis of François Pottier\cite{francois}.
+Although our subtyping relation is much simpler than the one in his work,
+then maybe, with just the right amount of depth,
+studying the topological properties of subtyping graph,
+could lead to some simpler, yet \textit{sound} solution.
+
+The \textit{heuristic} approach we described, produced desired results
+for all the examples we tried.
 However, it may be possible that there is type and constraint set that our method
-fails to generate the \textit{most general} type, but given short time window for
+fails to generate the \textit{most general unifier}, but given short time window for
 this work we were not able to find such example.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -975,9 +988,9 @@ this work we were not able to find such example.
      \url{https://doi.org/10.1016/0022-0000(78)90014-4}.
 \bibitem{hindley}
     J. Roger Hindley. 1969. The Principal Type-Scheme of an Object in Combinatory Logic. Transactions of the American Mathematical Society, 146, 29-60. \url{https://doi.org/10.2307/1995158}
-
-
-    
+\bibitem{francois}
+    François Pottier. Type Inference in the Presence of Subtyping: from Theory to Practice. [Research
+    Report] RR-3483, INRIA. 1998. ffinria-00073205f
 \end{thebibliography}
 
 \end{document}
