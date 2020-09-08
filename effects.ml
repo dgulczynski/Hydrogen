@@ -16,7 +16,7 @@ type typ =
   | Unit
   | Int
   | Arrow  of typ * typ * effect
-  | TV     of typ univar ref
+  | TypVar of typ univar ref
   | GenTyp of identifier
   | Forall of instance * signature * typ
   | Bad
@@ -85,54 +85,55 @@ let sig_map (f : typ -> typ) : signature -> signature = function
   | Error   -> Error
   | State t -> State (f t)
 
+let ( *** ) (is : instance set) : effect -> effect = function
+  | Fixed is'          -> Fixed (merge is is')
+  | Flexible (is', e') -> Flexible (merge is is', e')
+  | GenEff (is', gv)   -> GenEff (merge is is', gv)
+
+let ( <-: ) (r : 'a univar ref) (x : 'a) : unit = r := Bound x
+
 let rec find_e : effect -> effect = function
   | Flexible ([], {contents= Bound e}) -> find_e e
-  | Flexible (is, {contents= Bound e}) -> (
-    match find_e e with
-    | Fixed is'          -> Fixed (merge is is')
-    | Flexible (is', e') -> Flexible (merge is is', e')
-    | GenEff (is', gv)   -> GenEff (merge is is', gv) )
+  | Flexible (is, {contents= Bound e}) -> is *** find_e e
   | e -> e
 
 let rec find_t : typ -> typ = function
-  | Arrow (t1, t2, eff)            -> Arrow (find_t t1, find_t t2, find_e eff)
-  | TV ({contents= Bound t} as tv) ->
+  | Arrow (t1, t2, eff) -> Arrow (find_t t1, find_t t2, find_e eff)
+  | TypVar ({contents= Bound t} as tv) ->
       let t' = find_t t in
-      tv := Bound t' ;
-      t'
-  | Forall (a, s, t)               -> Forall (a, sig_map find_t s, find_t t)
-  | t                              -> t
+      tv <-: t' ; t'
+  | Forall (a, s, t) -> Forall (a, sig_map find_t s, find_t t)
+  | t -> t
 
 let rec string_of_type : typ -> string = function
-  | Unit                   -> "Unit"
-  | Int                    -> "Int"
-  | Arrow (t1, t2, eff)    ->
+  | Unit                       -> "Unit"
+  | Int                        -> "Int"
+  | Arrow (t1, t2, eff)        ->
       ( match find_t t1 with
       | Arrow _ -> "(" ^ string_of_type t1 ^ ") "
       | _       -> string_of_type t1 ^ " " )
       ^ (match find_e eff with Fixed [] -> "" | eff' -> "-{" ^ string_of_effect eff' ^ "}")
       ^ "-> " ^ string_of_type t2
-  | TV {contents= Free a}  -> a
-  | TV {contents= Bound t} -> string_of_type t
-  | GenTyp v               -> v
-  | Forall (a, s, t)       -> "∀" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_type t
-  | Bad                    -> "ILL-TYPED"
+  | TypVar {contents= Free a}  -> a
+  | TypVar {contents= Bound t} -> string_of_type t
+  | GenTyp v                   -> v
+  | Forall (a, s, t)           -> "∀" ^ a ^ ":" ^ string_of_signature s ^ ". "
+                                  ^ string_of_type t
+  | Bad                        -> "ILL-TYPED"
 
 and string_of_signature : signature -> string = function
   | Error   -> "Error"
   | State t -> "State " ^ string_of_type t
 
-and string_of_effect : effect -> string =
-  let aux = function
-    | []      -> ""
-    | i :: is -> List.fold_left (fun i acc -> i ^ " " ^ acc) i is
-  in
-  function
+and string_of_effect (e : effect) : string =
+  let aux = List.fold_right (fun i acc -> i ^ "," ^ acc) in
+  match find_e e with
   | Fixed [] -> "ι"
-  | Fixed is -> aux is
-  | Flexible (is, {contents= Free a}) -> aux is ^ a
-  | Flexible (is, {contents= Bound e}) -> aux is ^ string_of_effect e
-  | GenEff (is, v) -> aux is ^ v
+  | Fixed [i] -> i
+  | Fixed is -> aux is ""
+  | Flexible ([], {contents= Free a}) | GenEff ([], a) -> a
+  | Flexible (is, {contents= Free a}) | GenEff (is, a) -> aux is a
+  | Flexible (is, {contents= Bound e}) -> aux is (string_of_effect e)
 
 let string_of_op : op -> string = function Raise -> "raise" | Put -> "put" | Get -> "get"
 
@@ -172,7 +173,7 @@ let (freshTV : unit -> typ), (refreshTV : unit -> unit) =
   let counter = ref (-1) in
   ( (fun () ->
       incr counter ;
-      TV (ref (Free (Printf.sprintf "?τ%d" !counter))))
+      TypVar (ref (Free (Printf.sprintf "?τ%d" !counter))))
   , fun () -> counter := -1 )
 
 let (fresh_effect_univar : unit -> effect univar ref), (refreshEV : unit -> unit) =
@@ -210,24 +211,24 @@ let type_of_op_in_env (theta : ienv) (a : instance) (op : op) : op_type =
   type_of_op (signature_of_instance theta a) a op
 
 let rec occurs (x : identifier) : typ -> bool = function
-  | Arrow (t1, t2, _)     -> occurs x t1 || occurs x t2
-  | TV {contents= Free a} -> x = a
-  | _                     -> false
+  | Arrow (t1, t2, _)         -> occurs x t1 || occurs x t2
+  | TypVar {contents= Free a} -> x = a
+  | _                         -> false
 
 let expand (v : effect univar ref) : instance set -> unit = function
   | [] -> ()
-  | is -> v := Bound (freshEV is)
+  | is -> v <-: freshEV is
 
 let rec union_t ((t1, t2) : typ * typ) (ecs : effect constraints) : effect constraints =
   match (find_t t1, find_t t2) with
   | t1', t2' when t1' = t2' -> ecs
   | Arrow (a1, b1, e1), Arrow (a2, b2, e2) ->
       union_t (a2, a1) (union_e (e1, e2) (union_t (b1, b2) ecs))
-  | TV {contents= Bound t}, t' | t', TV {contents= Bound t} -> union_t (t, t') ecs
-  | TV ({contents= Free a} as tv), t' | t', TV ({contents= Free a} as tv) ->
+  | TypVar {contents= Bound t}, t' | t', TypVar {contents= Bound t} -> union_t (t, t') ecs
+  | TypVar ({contents= Free a} as tv), t' | t', TypVar ({contents= Free a} as tv) ->
       if occurs a t' then
         raise (IllTyped ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
-      else tv := Bound t' ;
+      else tv <-: t' ;
       ecs
   | t1', t2' ->
       raise (IllTyped ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
@@ -257,8 +258,6 @@ and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect con
         raise
           (IllTyped ("Cannot unify " ^ string_of_effect e1' ^ " with " ^ string_of_effect e2'))
 
-let solve_e (ecs : effect constraints) : effect constraints = List.fold_right union_e ecs []
-
 let type_of_var (gamma : env) (v : var) : typ =
   match List.assoc_opt v gamma with
   | None   -> raise (IllTyped ("Free variable " ^ v))
@@ -282,7 +281,7 @@ let free_univars_of (ignore_ts : typ univar ref list) (ignore_es : effect univar
   let expand e evs = match find_e e with Flexible (_, ev) -> merge [ev] evs | _ -> evs in
   let rec collect t =
     match find_t t with
-    | TV ({contents= Free a} as tv) when not (List.mem tv ignore_ts) -> ([tv], [], [])
+    | TypVar ({contents= Free a} as tv) when not (List.mem tv ignore_ts) -> ([tv], [], [])
     | Arrow (t1, t2, eff) ->
         let tvars1, contra1, co1 = collect t1 in
         let tvars2, contra2, co2 = collect t2 in
@@ -324,7 +323,7 @@ let generalize (gamma : env) (t : typ) : typ =
     | Flexible (is, ({contents= Free a} as ev)) as eff ->
         if List.assoc_opt ev fev != None then eff
         else (
-          ev := Bound (freshGE empty) ;
+          ev <-: freshGE empty ;
           eff )
     | eff -> eff
   in
@@ -334,12 +333,12 @@ let generalize (gamma : env) (t : typ) : typ =
         and eff' = generalize_e fvs eff
         and t2' = generalize_t fvs t2 in
         Arrow (t1', t2', eff')
-    | TV ({contents= Free a} as tv) as t ->
+    | TypVar ({contents= Free a} as tv) as t ->
         if List.mem tv ftv then t
         else (
-          tv := Bound (freshGT ()) ;
+          tv <-: freshGT () ;
           t )
-    | TV {contents= Bound t} -> generalize_t fvs t
+    | TypVar {contents= Bound t} -> generalize_t fvs t
     | Forall (a, s, t) -> Forall (a, sig_map (generalize_t fvs) s, generalize_t fvs t)
     | t -> t
   in
@@ -455,12 +454,12 @@ let solve_within (gamma : env) ((typ, eff) : type_effect) (ecs : effect constrai
          |Some Covariant, Some Covariant
          |Some Contravariant, Some Contravariant
          |Some Invariant, Some Invariant ->
-            ev1 := Bound e2 ;
+            ev1 <-: e2 ;
             (ecs, refresh_evs variance, true)
         | Some Contravariant, Some Invariant
          |Some Contravariant, Some Covariant
          |Some Invariant, Some Covariant ->
-            ev1 := Bound e2 ;
+            ev1 <-: e2 ;
             (ecs, refresh_evs (update_ev ev2 Invariant variance), true)
         | _ -> (ec :: ecs, variance, swapped) )
     | (e1, e2) as ec when e1 != e2 -> (ec :: ecs, variance, swapped)
@@ -479,7 +478,7 @@ let solve_within (gamma : env) ((typ, eff) : type_effect) (ecs : effect constrai
   in
   List.iter
     (fun ev ->
-      match List.assoc_opt ev variance with Some Covariant -> ev := Bound pure | _ -> ())
+      match List.assoc_opt ev variance with Some Covariant -> ev <-: pure | _ -> ())
     (diff (refresh_es (List.map fst free_es)) (refresh_es (List.map fst bound_es))) ;
   ecs
 
@@ -531,19 +530,16 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
     | App (e1, e2)                ->
         let t1, ef1 = infer gamma theta e1 in
         let t2, ef2 = infer gamma theta e2 in
-        let t = freshTV () and eff_arr = freshEV empty and eff = freshEV empty in
-        constrain_typ (t1, Arrow (t2, t, eff_arr)) ;
-        constrain_eff (eff_arr, eff) ;
+        let t = freshTV () and eff = freshEV empty in
+        constrain_typ (t1, Arrow (t2, t, eff)) ;
         constrain_eff (ef1, eff) ;
         constrain_eff (ef2, eff) ;
         (t, eff)
     | Op (a, op, e)               ->
         let t1, t2 = type_of_op_in_env theta a op in
-        let e_t, e_eff = infer gamma theta e in
-        let eff = freshEV [a] in
-        constrain_typ (e_t, t1) ;
-        constrain_eff (e_eff, eff) ;
-        (t2, eff)
+        let t, eff = infer gamma theta e in
+        constrain_typ (t, t1) ;
+        (t2, [a] *** eff)
     | Handle (a, e, (hs, x, ret)) ->
         let s = signature_of_handler (hs, x, ret) in
         let t = freshTV () and eff = freshEV empty in
@@ -556,8 +552,7 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
         List.iter infer_handler hs ;
         let e_t, e_eff = infer gamma ((a, s) :: theta) e in
         let ret_t, ret_eff = infer ((x, e_t) :: gamma) theta ret in
-        (* all a occurences should be found at this point??? *)
-        constrain_eff (e_eff, Flexible ([a], ref (Bound eff))) ;
+        constrain_eff (e_eff, [a] *** eff) ;
         constrain_typ (ret_t, t) ;
         constrain_eff (ret_eff, eff) ;
         (t, eff)

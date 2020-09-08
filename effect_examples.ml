@@ -50,7 +50,17 @@ let _ =
         ( "update"
         , ILam
             ("s", State (GenTyp "'a"), Lam ("f", Op ("s", Put, V "f" @: Op ("s", Get, Nil))))
-        , V "update" ) ]
+        , V "update" )
+    ; Let
+        ( "move_map"
+        , ILam
+            ( "from"
+            , State (GenTyp "a")
+            , ILam
+                ( "to"
+                , State (GenTyp "b")
+                , Lam ("f", Op ("to", Put, V "f" @: Op ("from", Get, Nil))) ) )
+        , I 1 ) ]
 
 let _ =
   print_examples "Instance application"
