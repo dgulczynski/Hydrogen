@@ -19,7 +19,7 @@ type typ =
   | TypVar of typ univar ref
   | GenTyp of identifier
   | Forall of instance * signature * typ
-  | Bad
+  | IllTyped
 
 and signature = Error | State of typ
 
@@ -57,7 +57,7 @@ type ienv = signature environment
 
 type variance = Covariant | Invariant | Contravariant
 
-exception IllTyped of string
+exception InferenceError of string
 
 let empty : 'a set = []
 
@@ -119,7 +119,7 @@ let rec string_of_type : typ -> string = function
   | GenTyp v                   -> v
   | Forall (a, s, t)           -> "∀" ^ a ^ ":" ^ string_of_signature s ^ ". "
                                   ^ string_of_type t
-  | Bad                        -> "ILL-TYPED"
+  | IllTyped                        -> "ILL-TYPED"
 
 and string_of_signature : signature -> string = function
   | Error   -> "Error"
@@ -187,14 +187,14 @@ let freshEV (is : instance set) : effect = Flexible (is, fresh_effect_univar ())
 
 let signature_of_instance (theta : ienv) (a : instance) : signature =
   match List.assoc_opt a theta with
-  | None   -> raise (IllTyped ("Free instance " ^ a))
+  | None   -> raise (InferenceError ("Free instance " ^ a))
   | Some s -> s
 
 let signature_of_handler ((ops, _, _) as h : handler) : signature =
   match ops with
   | [(Raise, _, _, _)] -> Error
   | [(Get, _, _, _); (Put, _, _, _)] | [(Put, _, _, _); (Get, _, _, _)] -> State (freshTV ())
-  | _ -> raise (IllTyped ("Couldn't infer handler signature from " ^ string_of_handler h))
+  | _ -> raise (InferenceError ("Couldn't infer handler signature from " ^ string_of_handler h))
 
 let type_of_op (s : signature) (a : instance) (op : op) : op_type =
   match (s, op) with
@@ -203,7 +203,7 @@ let type_of_op (s : signature) (a : instance) (op : op) : op_type =
   | State t, Get -> (Unit, t)
   | s, op        ->
       raise
-        (IllTyped
+        (InferenceError
            ( "Instance " ^ a ^ ":" ^ string_of_signature s ^ " doesn't define operator "
            ^ string_of_op op ))
 
@@ -227,16 +227,16 @@ let rec union_t ((t1, t2) : typ * typ) (ecs : effect constraints) : effect const
   | TypVar {contents= Bound t}, t' | t', TypVar {contents= Bound t} -> union_t (t, t') ecs
   | TypVar ({contents= Free a} as tv), t' | t', TypVar ({contents= Free a} as tv) ->
       if occurs a t' then
-        raise (IllTyped ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
+        raise (InferenceError ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
       else tv <-: t' ;
       ecs
   | t1', t2' ->
-      raise (IllTyped ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
+      raise (InferenceError ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
 
 and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect constraints =
   let on_failed_subtyping e1 e2 =
     raise
-      (IllTyped ("Effect " ^ string_of_effect e1 ^ " does not subtype " ^ string_of_effect e2))
+      (InferenceError ("Effect " ^ string_of_effect e1 ^ " does not subtype " ^ string_of_effect e2))
   in
   let e1' = find_e e1 and e2' = find_e e2 in
   if e1' = e2' then ecs
@@ -256,11 +256,11 @@ and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect con
       match diff i1 i2 with [] -> ecs | _ -> on_failed_subtyping e1' e2' )
     | _ ->
         raise
-          (IllTyped ("Cannot unify " ^ string_of_effect e1' ^ " with " ^ string_of_effect e2'))
+          (InferenceError ("Cannot unify " ^ string_of_effect e1' ^ " with " ^ string_of_effect e2'))
 
 let type_of_var (gamma : env) (v : var) : typ =
   match List.assoc_opt v gamma with
-  | None   -> raise (IllTyped ("Free variable " ^ v))
+  | None   -> raise (InferenceError ("Free variable " ^ v))
   | Some t -> find_t t
 
 let mix_variance (v1 : variance) (v2 : variance) : variance =
@@ -398,9 +398,9 @@ let rec name_unnamed (a : instance) : expr -> expr = function
   | Fun (f, x, e)   -> Fun (f, x, name_unnamed a e)
   | Let (x, e, e')  -> Let (x, name_unnamed a e, name_unnamed a e')
   | App (e1, e2)    -> App (name_unnamed a e1, name_unnamed a e2)
-  | Op _ | Handle _ -> raise (IllTyped "Named and unnamed handlers combined")
+  | Op _ | Handle _ -> raise (InferenceError "Named and unnamed handlers combined")
   | UOp (op, e)     -> Op (a, op, e)
-  | UHandle _       -> raise (IllTyped "Nested unnamed handlers")
+  | UHandle _       -> raise (InferenceError "Nested unnamed handlers")
   | e               -> e
 
 let solve_simple (tcs : typ constraints) (ecs : effect constraints) : effect constraints =
@@ -570,20 +570,20 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
             | State t1, State t2 -> constrain_typ (t2, t1)
             | _                  ->
                 raise
-                  (IllTyped
+                  (InferenceError
                      ( "Instance " ^ a ^ " : " ^ string_of_signature s ^ " application to "
                      ^ string_of_type_effect (t, eff) )) ) ;
             subst_instance a' a (t', eff)
         | t', s                  ->
             raise
-              (IllTyped
+              (InferenceError
                  ( "Instance (" ^ a ^ " : " ^ string_of_signature s ^ ") application to ("
                  ^ string_of_expr e ^ " : "
                  ^ string_of_type_effect (t', eff)
                  ^ ") which does not reduce to instance lambda" )) )
     | UOp (op, _)                 ->
         raise
-          (IllTyped ("Operator " ^ string_of_op op ^ " used without corresponding handler"))
+          (InferenceError ("Operator " ^ string_of_op op ^ " used without corresponding handler"))
     | UHandle (e, h)              ->
         let a = "?unnamed" in
         infer gamma theta (Handle (a, name_unnamed a e, h))
@@ -597,6 +597,6 @@ let infer_type (expr : expr) : env * typ * effect =
     refreshEV () ;
     let env, (typ, eff), cs, ecs = infer_type_with_env [] [] expr in
     (env, typ, eff)
-  with IllTyped e ->
+  with InferenceError e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
-    ([], Bad, pure)
+    ([], IllTyped, pure)

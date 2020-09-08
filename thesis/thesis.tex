@@ -48,6 +48,7 @@
 \newcommand{\gens}[6][\Gamma;\Theta]{\ensuremath{{{#1} \vdash_\textbf{Gen} {#2} \: : {#3}/{#4}} \rightsquigarrow {#5};{#6}}}
 \newcommand{\arrow}[3]{{#1}\rightarrow_{#2}{#3}}
 \newcommand{\lam}[1][x]{\ensuremath{\lambda #1.\:}}
+\newcommand{\fun}[1][f,\:x]{\ensuremath{\textbf{fun } #1.\:}}
 \newcommand{\optypes}[5][\Theta]{\ensuremath{{#1}\vdash{#2}_{#3} : {#4} \Rightarrow {#5}}}
 \newcommand{\ops}[2]{\optypes{op}{a}{#1}{#2}}
 \newcommand{\fresh}[1]{\ensuremath{\operatorname{fresh}({#1})}}
@@ -155,7 +156,7 @@ We adjusted it to match the style of \textit{ML-the-calculus} and \textit{ML-the
 \\ 
 \textbf{signature} & \ni \sigma \Coloneqq \textbf{Error} \mid \textbf{State } \tau& \text{(signatures)}
 \\
-\textbf{expr} & \ni e \Coloneqq x \mid () \mid n \mid \lam e \mid \textbf{fun }f\:x.\:e \mid e \: e \mid \textbf{let } x = e \: \textbf{ in } \: e & \text{(terms)}
+\textbf{expr} & \ni e \Coloneqq x \mid () \mid n \mid \lam e \mid \fun e \mid e \: e \mid \textbf{let } x = e \: \textbf{ in } \: e & \text{(terms)}
 \\
  & \qquad\qquad \mid \lam[(a : \sigma)] e \mid e \: a \mid op_a \: e \mid \textbf{handle}_a \: e\: \{h; \textbf{return } x. e\}
 \\
@@ -167,7 +168,7 @@ Terms (or expressions) are given by:
 \begin{itemize}
     \item variables, bound by abstractions, let-expressions, handlers, or environment $\Gamma$,
     \item constants: $()$ and $n \in \mathbb{C}$,
-    \item abstractions: anonymous functions $\lam e$ with argument $x$ and body $e$ and recursive functions denoted $\textbf{fun }f\:x.\:e$,
+    \item abstractions: anonymous functions $\lam e$ with argument $x$ and body $e$ and recursive functions denoted $\fun e$,
     \item instance abstraction: $\lam[(a:\sigma)]e$, that lets programmers write code
     unspecific to certain effect \textit{instance}, but capable of working with any
     instance of specified signature,
@@ -235,7 +236,7 @@ $$
 \inference{
     \types[\Gamma, (f : \arrow{\tau_1}{\varepsilon}{t_2}),(x : \tau_1); \Theta]{e}{\tau_2}{\varepsilon} 
 }{
-    \types{\textbf{fun}\:f\:x.\: e}{\arrow{\tau_1}{\varepsilon}{\tau_2}}{\iota}
+    \types{\fun e}{\arrow{\tau_1}{\varepsilon}{\tau_2}}{\iota}
 }
 $$
 The \textit{type constructor} $\rightarrow$ is used to type abstractions,
@@ -623,7 +624,7 @@ via function \textit{inst}.
         \fresh{t_2} \\
         \gens[\Gamma, (f : \arrow{t_1}{\epsilon}{t_2}),(x : t_1); \Theta]{e}{\tau}{\varepsilon}{C}{S}
     }{
-        \gens{\textbf{fun } f x . e}{\arrow{t_1}{\epsilon}{t_2}}{\iota}
+        \gens{\fun e}{\arrow{t_1}{\epsilon}{t_2}}{\iota}
         {C \cup \{\varepsilon <: \epsilon, \tau <: t_2 \}}{S}
     }
 \end{gather*}
@@ -952,19 +953,114 @@ $$
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Implementation}
-Pure OCaml.
+The algorithm we described is accompanied by a software implementation,
+written in pure OCaml.
+Differences from $\vdash_\textbf{Gen}$ include that the built substitution is
+applied \textit{on the fly} globally, rather than returned,
+as the unification variables are implemented using memory references that are updated throughout the process.
+Also, all the occurences \textit{universal variables} (denoted $'\tau\alpha$
+or $'\varepsilon\alpha$) are quantified \textit{by default}
+(the $\forall$ of universally quantified types is implicit).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Representation}
-How calculus, type system, constraints and substitution are implemented.
+Type system and expressions of the calculus are defined in \texttt{Calculus.ml} file:
+\begin{lstlisting}
+type identifier = string
+type instance = identifier
+type instance = identifier
+
+type $\text{'}$a univar = Free of identifier | Bound of $\text{'}$a
+
+type typ =
+  | Unit
+  | Int
+  | Arrow    of typ * typ * effect              (*  $\arrow{\tau_1}{\varepsilon}{\tau_2}\ $      *)
+  | TypVar   of typ univar ref                  (*     $t$     *)
+  | GenTyp   of identifier                      (*    $'\tau\alpha$      *)
+  | Forall   of instance * signature * typ      (*  $\forall (a:\sigma).\ \tau$ *)
+  | IllTyped
+
+and signature = Error | State of typ          (* $ {Error} \mid {State}\ \tau $ *)
+
+and effect =
+  | Fixed    of instance set                      (*    $\ I\ \ $  *)
+  | Flexible of instance set * effect univar ref  (*   $I * \epsilon\ $ *)
+  | GenEff   of instance set * identifier         (*  $I * '\varepsilon\alpha$ *)
+ 
+type expr =
+  | Nil                                              (*  $()$   *)
+  | I       of int                                   (*  $n$   *)
+  | V       of var                                   (*  $x$   *)
+  | Lam     of var * expr                            (* $\lam e$ *)
+  | Fun     of var * var * expr                  (* $\fun e$ *)
+  | Let     of var * expr * expr            (* $\textbf{let }x = e_1 \textbf{ in } e_2$ *)
+  | App     of expr * expr                           (* $e_1\ e_2$ *)
+  | Op      of instance * op * expr                  (* $op_a\ e$ *)
+  | Handle  of instance * expr * handler       (* $\textbf{handle}_a \: e\: \{h\}$ *)
+  | ILam    of instance * signature * expr        (* $\lam[(a:\sigma)] e$ *)
+  | IApp    of expr * instance                        (* $e\ a$ *)
+  | UHandle of expr * handler                  (*  $\textbf{handle} \: e\: \{h\}$ *)
+  | UOp     of op * expr                              (* $op\ e$ *)
+  
+and op = Raise | Get | Put
+
+and handler = (op * var * var * expr) list * var * expr
+                                  (* $[(op,\ x,\ k,\ e)]\ ;\ \textbf{return } x.\ e_r$ *)
+type op_type = typ * typ                           (* $\tau_1 \Rightarrow \tau_2$ *)
+
+type type_effect = typ * effect                       (* $\tau/\varepsilon$ *)
+\end{lstlisting}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Project structure}
-Which code does what
+In \texttt{Inference.ml} defines stuff needed for inference.
+Judgement $\vdash_\textbf{Gen}$ is implented by subprocedure \texttt{infer}
+of the function \texttt{infer\_type\_with\_env}, which returns the type
+after resolving constraints, using procedures describe in \hyperlink{section.4.2}{Chapter 4}.
+\begin{lstlisting}
+type $\text{'}$a constraints = ($\text{'}$a * $\text{'}$a) list
+
+type $\text{'}$a environment = (identifier * $\text{'}$a) list
+
+type env = typ environment
+type ienv = signature environment
+
+val solve_simple : typ constraints -> effect constraints -> effect constraints
+
+val solve_within : env -> type_effect -> effect constraints -> effect constraints
+
+let infer_type_with_env : env -> ienv -> expr -> (env * type_effect * effect constraints)
+\end{lstlisting}
+For meaningful printing, we also include types for variables bound by \textit{let-constructs}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Tutorial}
-Some examples and how to run it.
+File \texttt{examples.ml} contains a few meaningful examples of type inference.
+By convention we print unresolved unification variables with \texttt{?} sign.
+\begin{lstlisting}
+$\text{\$}$> ocaml examples.ml 
+$\vdash$ $\lambda$e:Error. $\lambda$x. raise_e x : $\forall$e:Error. Unit -{e}-> ?$\tau$1 / $\iota$
+
+$\vdash$ handle put 21 {put v k. k () | get () k. k 37 | return x. x} : Unit / $\iota$
+
+$\vdash$ $\lambda$x. $\lambda$y. $\lambda$z. (x z) (y z) : (?$\tau$2 -{?$\varepsilon$2}-> ?$\tau$4 -{?$\varepsilon$2}-> ?$\tau$5) -> (?$\tau$2 {?$\varepsilon$2}-> ?$\tau$4) -> ?$\tau$2 -{?$\varepsilon$2}-> ?$\tau$5 / $\iota$
+
+$\vdash$ let id = $\lambda$x. x in id id : ?$\tau$2 -> ?$\tau$2 / $\iota$
+  (id : $\text'\tau$a -> $\text'\tau$a)
+
+$\vdash$ let apply = $\lambda$f. $\lambda$x. f x in apply ($\lambda$x. x) : ?$\tau$4 -> ?$\tau$4 / $\iota$
+  (apply : ($\text'\tau$a -{$\text'\varepsilon$b}-> $\text'\tau$c) -> $\text'\tau$a -{$\text'\varepsilon$b}-> $\text'\tau$c)
+
+$\vdash$ let fix = fun fix f. f (fix f) in fix ($\lambda$x. $\lambda$y. $\lambda$z. 2) : ?$\tau$6 -> ?$\tau$7 -> Int / $\iota$
+  (fix : ($\text'\tau$a -{$\text'\varepsilon$b}-> $\text'\tau$a) -{$\text'\varepsilon$b}-> $\text'\tau$a)
+
+$\vdash$ let update = $\lambda$s:State a. $\lambda$f. put_s (f (get_s ())) in handle_b ($\lambda$(). get_b ()) ((update<b>) ($\lambda$x. x)){get () k. $\lambda$c. (k c) c | put v k. $\lambda$c. (k ())   v | return x. $\lambda$c. x} : ?$\tau$15 -> ?$\tau$15 / $\iota$
+  (update : $\forall$s:State a. (a -{s,$\text'\varepsilon$a}-> a) -{s,$\text'\varepsilon$a}-> Unit)
+
+$\vdash$ let move_map = $\lambda$from:State a. $\lambda$to:State b. $\lambda$f. put_to (f (get_from ())) in 1 : Int / $\iota$
+  (move_map : $\forall$from:State a. $\forall$to:State b. (a -{from,$\text'\varepsilon$a}-> b) -{from,to,$\text'\varepsilon$a}-> Unit)
+\end{lstlisting}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \chapter{Future work}
