@@ -178,14 +178,7 @@ Terms (or expressions) are given by:
     of $e$,
     \item handlers: $\textbf{handle}_a \: e\: \{h;\textbf{return } x. e_r\}$ of instance $a$, 
     which provides meaning to operators: calling $op_a\:e_x$, executes body $e_{op}$ of
-    a construct $(op, x, k.\:e_{op})$ defined in $h$, in which $x$ gets bounds to value of $e_x$.
-    Supplying the \textit{continuation} $k$ with some value $v$ continues evaluation of $e$,
-    with $v$ substituted in place of operation call.
-    In a sense $k$ acts just like an ordinary function, and programmer may use it
-    in many different ways or not even use it all, returning a value straight from the handler code.
-    After $e$ is evaluated, its value is bound to $x$ in $e_r$ expression,
-    which is the final value returned by handler.
-
+    a construct $(op, x, k.\:e_{op})$ defined in handler $h$.
 \end{itemize}
 
 Instead of allowing effects of arbitrary signatures, we limited them to instances
@@ -300,9 +293,11 @@ $$
     \types{e\:b}{\tau[b/a]}{\iota}
 }
 $$
-For handling different instances of same effect, i.e two cells of memory of $\textbf{State }\tau$,
-there are lambda terms, which can be applied with instances bound by handlers or other instance lambdas.
-.
+For handling operators of distinct occurrences of the same signature,
+i.e many cells of memory via $\textbf{State }\tau$,
+we differentiate them by assigning them different instances.
+\textit{Instance abstractions} allow us to write code that works not only with one instance of particular signature,
+but with any that is supplied using \textit{instance application} of instances bound by handlers or other instance lambdas.
 
 $$
 \inference{
@@ -312,18 +307,23 @@ $$
     \types{op_a \: e}{\tau}{a \circ \varepsilon}
 }
 $$
-Then the operators of instance $a$ and type $\tau_1 \rightarrow \tau_2$ if applied with
-some expression $e$ of type $\tau_1$ and effect $\varepsilon$ are typed with $\tau_2 /{ a \circ \varepsilon}$ 
+Operators of type $\tau_1 \Rightarrow \tau_2$ expect arguments of type $\tau_1$
+and return value of type $\tau_2$. Type of $e$ must match the operator type.
+Effect of computing $e$ is extended by $\{a\}$.
 
 $$
  \inference{
-    \types[\Gamma;\Theta,(a:\sigma)]{e}{\tau'}{a \circ \varepsilon} &
     \types{h}{\sigma \triangleright \tau}{\varepsilon} &
+    \types[\Gamma;\Theta,(a:\sigma)]{e}{\tau'}{a \circ \varepsilon} &
     \types[\Gamma,(x:\tau');\Theta]{e_r}{\tau}{\varepsilon}
 }{
     \types{\textbf{handle}_a \: e\: \{h;\textbf{return } x. e_r\}}{\tau}{\varepsilon}
 }
 $$
+For type-checking handler body, there's a separate relation $\vdash \cdot : \cdot \triangleright \cdot$, explained below.
+Types of all \textit{exectution paths} of the handler must match,
+whether the value returns from within handler body
+or via return expression $e_r$ (where value of evaluating $e$ gets bound to $x$).
 
 Finally, we allow every type and effect to \textit{grow} as needed:
 $$
@@ -334,7 +334,7 @@ $$
 }
 $$
 
-Typing handlers:
+There are two clauses for typing handlers, as we only have kinds of signatures. It could easily extended for other signatures but that's not important to this work.
 \begin{gather*}
 \begin{gathered}
 \inference{
@@ -351,9 +351,16 @@ Typing handlers:
 }
 \end{gathered}
 \end{gather*}
-There are two clauses for typing handlers, as we only have kinds of signatures. It could easily extended for other signatures but that's not important to this work.
+Supplying the \textit{continuation} $k$ with some value $v$ continues evaluation of $e$,
+with $v$ substituted in place of operation call,
+thus in the body of operator handler of type $\tau_1\Rightarrow\tau_2$, $k$ is given type
+$\arrow{\tau_2}{\varepsilon}{\tau}$ and $x$ is given $\tau_2$.
+In a sense $k$ acts just like an ordinary function, and programmer may use it
+in many different ways or not even use it all, returning a value straight from the handler code.
+which is the final value returned by handler.
+However they choose to do so, the type-and-effect of handlers expression must match the type
+of the whole handled expression.
 
-Typing operators:
 \begin{gather*}
 \begin{gathered}
 \inference{
@@ -375,6 +382,8 @@ Typing operators:
 }
 \end{gathered}
 \end{gather*}
+Relation $\optypes{op}{a}{\tau_1}{\tau_2}$ simply finds the signature
+$\sigma$ bound to instance $a$ in environment $\Theta$ and returns the operator's type.    
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Subtyping}
