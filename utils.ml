@@ -37,7 +37,6 @@ let ( @: ) (e1 : expr) (e2 : expr) : expr = App (e1, e2)
 
 let ( ->: ) (t1 : typ) _ (t2 : typ) (eff : effect) : typ = Arrow (t1, eff, t2)
 
-
 let rec find_e : effect -> effect = function
   | Flexible ([], {contents= Bound e}) -> find_e e
   | Flexible (is, {contents= Bound e}) -> is *** find_e e

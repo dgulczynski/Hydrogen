@@ -5,11 +5,10 @@ exception IllTypedExn of string
 val freshTV : unit -> Calculus.typ
 val refreshTV : unit -> unit
 val fresh_effect_univar : unit -> Calculus.effect Calculus.univar ref
-val refresh_unification_variables : unit -> unit
+val refresh_univars : unit -> unit
 val infer_type_with_env :
   env ->
   ienv ->
   Calculus.expr ->
-  env * Calculus.type_effect * Calculus.typ constraints *
-  Calculus.effect constraints
-val infer_type : Calculus.expr -> env * Calculus.typ * Calculus.effect
+  env * Calculus.type_effect
+val infer_type : Calculus.expr -> env * Calculus.type_effect

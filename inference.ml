@@ -27,8 +27,7 @@ let (fresh_effect_univar : unit -> effect univar ref), (refreshEV : unit -> unit
 
 let freshEV (is : instance set) : effect = Flexible (is, fresh_effect_univar ())
 
-let refresh_unification_variables () : unit =
-  refreshTV () ; refreshEV ()
+let refresh_univars () : unit = refreshTV () ; refreshEV ()
 
 let signature_of_instance (theta : ienv) (a : instance) : signature =
   match List.assoc_opt a theta with
@@ -437,12 +436,17 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
         infer gamma theta (Handle (a, name_unnamed a e, h))
   in
   let typ, eff = solve_constraints_within gamma (infer gamma theta expr) in
+  ( match !ecs with
+  | []  -> ()
+  | ecs ->
+      print_string "Unresolved constraints: " ;
+      List.iter
+        (fun (e1, e2) -> print_string (string_of_effect e1 ^ " <: " ^ string_of_effect e2))
+        ecs ) ;
   (!env, (find_t typ, find_e eff), !tcs, !ecs)
 
 let infer_type (expr : expr) : env * typ * effect =
   try
-    refreshTV () ;
-    refreshEV () ;
     let env, (typ, eff), cs, ecs = infer_type_with_env [] [] expr in
     (env, typ, eff)
   with IllTypedExn e ->

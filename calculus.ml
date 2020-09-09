@@ -26,8 +26,6 @@ and effect =
   | Flexible of instance set * effect univar ref
   | GenEff   of instance set * identifier
 
-type type_effect = typ * effect
-
 type expr =
   | Nil
   | I       of int
@@ -48,3 +46,5 @@ and op = Raise | Get | Put
 and handler = (op * var * var * expr) list * var * expr
 
 type op_type = typ * typ
+
+type type_effect = typ * effect
