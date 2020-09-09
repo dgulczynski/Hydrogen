@@ -1,5 +1,4 @@
-;;
-#use "effects.ml"
+open Effects
 
 let print_inferred_type (expr : expr) : unit =
   let env, t, e = infer_type expr in
@@ -14,7 +13,7 @@ let print_examples (name : string) (es : expr list) =
 (* Infix alternative constructors *)
 let ( @: ) e1 e2 = App (e1, e2)
 
-let ( ->: ) t1 t2 eff = Arrow (t1, t2, eff)
+let ( ->: ) t1 t2 eff = Arrow (t1, eff, t2)
 
 let _ =
   print_examples "Simple effects"

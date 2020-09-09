@@ -1,17 +1,9 @@
 # Hydrogen
-Type inference playground.
-
-# Calculus' syntax
-<img src="https://render.githubusercontent.com/render/math?math=\text{var} \ni x,\dots">
-
-<img src="https://render.githubusercontent.com/render/math?math=\text{tvar} \ni \alpha,\dots">
-
-<img src="https://render.githubusercontent.com/render/math?math=\text{type} \ni \tau \Coloneqq \alpha \mid \text{Int} \mid \tau \rightarrow \tau">
-
-<img src="https://render.githubusercontent.com/render/math?math=\text{expr} \ni e \Coloneqq x \mid n \mid \lambda x . e \mid \text{fun} f x . e \mid e \: e \mid \text{let} x = e \: \text{in} \: e">
+Bachelor thesis project regarding type inference in presence of algebraic effects.
 
 # Usage
-Simply running `ocaml effect_examples.ml` should result in output like:
+To build the project along with examples use `ocamlbuild effect_examples.byte`.
+Running `./effect_examples.bye` (alternatively `ocaml print_examples.ml`) should result in output like:
 ```
 Simple effects:
 ⊢ λe:Error. λx. raise_e x : ∀e:Error. Unit -{e}-> ?τ1 / ι

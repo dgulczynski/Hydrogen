@@ -15,10 +15,10 @@ type 'a constraints = ('a * 'a) list
 type typ =
   | Unit
   | Int
-  | Arrow  of typ * typ * effect
-  | TypVar of typ univar ref
-  | GenTyp of identifier
-  | Forall of instance * signature * typ
+  | Arrow    of typ * effect * typ
+  | TypVar   of typ univar ref
+  | GenTyp   of identifier
+  | Forall   of instance * signature * typ
   | IllTyped
 
 and signature = Error | State of typ
@@ -98,7 +98,7 @@ let rec find_e : effect -> effect = function
   | e -> e
 
 let rec find_t : typ -> typ = function
-  | Arrow (t1, t2, eff) -> Arrow (find_t t1, find_t t2, find_e eff)
+  | Arrow (t1, eff, t2) -> Arrow (find_t t1, find_e eff, find_t t2)
   | TypVar ({contents= Bound t} as tv) ->
       let t' = find_t t in
       tv <-: t' ; t'
@@ -108,7 +108,7 @@ let rec find_t : typ -> typ = function
 let rec string_of_type : typ -> string = function
   | Unit                       -> "Unit"
   | Int                        -> "Int"
-  | Arrow (t1, t2, eff)        ->
+  | Arrow (t1, eff, t2)        ->
       ( match find_t t1 with
       | Arrow _ -> "(" ^ string_of_type t1 ^ ") "
       | _       -> string_of_type t1 ^ " " )
@@ -119,7 +119,7 @@ let rec string_of_type : typ -> string = function
   | GenTyp v                   -> v
   | Forall (a, s, t)           -> "∀" ^ a ^ ":" ^ string_of_signature s ^ ". "
                                   ^ string_of_type t
-  | IllTyped                        -> "ILL-TYPED"
+  | IllTyped                   -> "ILL-TYPED"
 
 and string_of_signature : signature -> string = function
   | Error   -> "Error"
@@ -194,7 +194,8 @@ let signature_of_handler ((ops, _, _) as h : handler) : signature =
   match ops with
   | [(Raise, _, _, _)] -> Error
   | [(Get, _, _, _); (Put, _, _, _)] | [(Put, _, _, _); (Get, _, _, _)] -> State (freshTV ())
-  | _ -> raise (InferenceError ("Couldn't infer handler signature from " ^ string_of_handler h))
+  | _ ->
+      raise (InferenceError ("Couldn't infer handler signature from " ^ string_of_handler h))
 
 let type_of_op (s : signature) (a : instance) (op : op) : op_type =
   match (s, op) with
@@ -211,7 +212,7 @@ let type_of_op_in_env (theta : ienv) (a : instance) (op : op) : op_type =
   type_of_op (signature_of_instance theta a) a op
 
 let rec occurs (x : identifier) : typ -> bool = function
-  | Arrow (t1, t2, _)         -> occurs x t1 || occurs x t2
+  | Arrow (t1, _, t2)         -> occurs x t1 || occurs x t2
   | TypVar {contents= Free a} -> x = a
   | _                         -> false
 
@@ -222,21 +223,24 @@ let expand (v : effect univar ref) : instance set -> unit = function
 let rec union_t ((t1, t2) : typ * typ) (ecs : effect constraints) : effect constraints =
   match (find_t t1, find_t t2) with
   | t1', t2' when t1' = t2' -> ecs
-  | Arrow (a1, b1, e1), Arrow (a2, b2, e2) ->
+  | Arrow (a1, e1, b1), Arrow (a2, e2, b2) ->
       union_t (a2, a1) (union_e (e1, e2) (union_t (b1, b2) ecs))
   | TypVar {contents= Bound t}, t' | t', TypVar {contents= Bound t} -> union_t (t, t') ecs
   | TypVar ({contents= Free a} as tv), t' | t', TypVar ({contents= Free a} as tv) ->
       if occurs a t' then
-        raise (InferenceError ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
+        raise
+          (InferenceError ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
       else tv <-: t' ;
       ecs
   | t1', t2' ->
-      raise (InferenceError ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
+      raise
+        (InferenceError ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
 
 and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect constraints =
   let on_failed_subtyping e1 e2 =
     raise
-      (InferenceError ("Effect " ^ string_of_effect e1 ^ " does not subtype " ^ string_of_effect e2))
+      (InferenceError
+         ("Effect " ^ string_of_effect e1 ^ " does not subtype " ^ string_of_effect e2))
   in
   let e1' = find_e e1 and e2' = find_e e2 in
   if e1' = e2' then ecs
@@ -256,7 +260,8 @@ and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect con
       match diff i1 i2 with [] -> ecs | _ -> on_failed_subtyping e1' e2' )
     | _ ->
         raise
-          (InferenceError ("Cannot unify " ^ string_of_effect e1' ^ " with " ^ string_of_effect e2'))
+          (InferenceError
+             ("Cannot unify " ^ string_of_effect e1' ^ " with " ^ string_of_effect e2'))
 
 let type_of_var (gamma : env) (v : var) : typ =
   match List.assoc_opt v gamma with
@@ -282,7 +287,7 @@ let free_univars_of (ignore_ts : typ univar ref list) (ignore_es : effect univar
   let rec collect t =
     match find_t t with
     | TypVar ({contents= Free a} as tv) when not (List.mem tv ignore_ts) -> ([tv], [], [])
-    | Arrow (t1, t2, eff) ->
+    | Arrow (t1, eff, t2) ->
         let tvars1, contra1, co1 = collect t1 in
         let tvars2, contra2, co2 = collect t2 in
         (merge tvars1 tvars2, merge co1 contra2, expand eff (merge contra1 co2))
@@ -328,11 +333,11 @@ let generalize (gamma : env) (t : typ) : typ =
     | eff -> eff
   in
   let rec generalize_t ((ftv, fev) as fvs) = function
-    | Arrow (t1, t2, eff) ->
+    | Arrow (t1, eff, t2) ->
         let t1' = generalize_t fvs t1
         and eff' = generalize_e fvs eff
         and t2' = generalize_t fvs t2 in
-        Arrow (t1', t2', eff')
+        Arrow (t1', eff', t2')
     | TypVar ({contents= Free a} as tv) as t ->
         if List.mem tv ftv then t
         else (
@@ -347,11 +352,11 @@ let generalize (gamma : env) (t : typ) : typ =
 let instantiate (t : typ) : typ =
   let rec instantiate_t t instd =
     match (t, instd) with
-    | Arrow (t1, t2, eff), _        ->
+    | Arrow (t1, eff, t2), _        ->
         let it1, instd1 = instantiate_t t1 instd in
         let it2, instd2 = instantiate_t t2 instd1 in
         let ieff, instdeff = instantiate_e eff instd2 in
-        (Arrow (it1, it2, ieff), instdeff)
+        (Arrow (it1, ieff, it2), instdeff)
     | GenTyp gv, (instd_t, instd_e) -> (
       match List.assoc_opt gv instd_t with
       | Some t -> (t, instd)
@@ -387,7 +392,7 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
     function Fixed is -> Fixed (f is) | Flexible (is, e) -> Flexible (f is, e) | e -> e
   and aux_type = function
     | Forall (a', s', t') when a' != a -> Forall (a', s', aux_type t')
-    | Arrow (t1, t2, eff) -> Arrow (t1, t2, aux_eff eff)
+    | Arrow (t1, eff, t2) -> Arrow (t1, aux_eff eff, t2)
     | t -> t
   in
   function t, e -> (aux_type (find_t t), aux_eff (find_e e))
@@ -504,12 +509,12 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
     | Lam (x, e)                  ->
         let tx = freshTV () in
         let te, eff = infer ((x, tx) :: gamma) theta e in
-        (Arrow (tx, te, eff), pure)
+        (Arrow (tx, eff, te), pure)
     | Fun (f, x, e)               ->
         let tfx = freshTV () and tx = freshTV () and f_eff = freshEV empty in
-        let tf = Arrow (tx, tfx, f_eff) in
+        let tf = Arrow (tx, f_eff, tfx) in
         let te, eff = infer ((f, tf) :: (x, tx) :: gamma) theta e in
-        constrain_typ (Arrow (tx, te, eff), tf) ;
+        constrain_typ (Arrow (tx, eff, te), tf) ;
         (tf, pure)
     | Let (x, e, e')              -> (
         let te, eff = infer gamma theta e in
@@ -531,7 +536,7 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
         let t1, ef1 = infer gamma theta e1 in
         let t2, ef2 = infer gamma theta e2 in
         let t = freshTV () and eff = freshEV empty in
-        constrain_typ (t1, Arrow (t2, t, eff)) ;
+        constrain_typ (t1, Arrow (t2, eff, t)) ;
         constrain_eff (ef1, eff) ;
         constrain_eff (ef2, eff) ;
         (t, eff)
@@ -545,7 +550,7 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
         let t = freshTV () and eff = freshEV empty in
         let infer_handler (op, x, r, e) =
           let t1, t2 = type_of_op s a op in
-          let th, eh = infer ((x, t1) :: (r, Arrow (t2, t, eff)) :: gamma) theta e in
+          let th, eh = infer ((x, t1) :: (r, Arrow (t2, eff, t)) :: gamma) theta e in
           constrain_typ (th, t) ;
           constrain_eff (eh, eff)
         in
@@ -583,7 +588,8 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
                  ^ ") which does not reduce to instance lambda" )) )
     | UOp (op, _)                 ->
         raise
-          (InferenceError ("Operator " ^ string_of_op op ^ " used without corresponding handler"))
+          (InferenceError
+             ("Operator " ^ string_of_op op ^ " used without corresponding handler"))
     | UHandle (e, h)              ->
         let a = "?unnamed" in
         infer gamma theta (Handle (a, name_unnamed a e, h))
