@@ -10,5 +10,5 @@ val infer_type_with_env :
   env ->
   ienv ->
   Calculus.expr ->
-  env * Calculus.type_effect
+  env * Calculus.type_effect * Calculus.effect constraints
 val infer_type : Calculus.expr -> env * Calculus.type_effect

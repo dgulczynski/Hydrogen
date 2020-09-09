@@ -3,7 +3,7 @@ open Utils
 open Inference
 
 let print_inferred_type (expr : expr) : unit =
-  let env, t, e = infer_type expr in
+  let env, (t, e) = infer_type expr in
   print_string ("⊢ " ^ string_of_expr expr ^ " : " ^ string_of_type_effect (t, e) ^ "\n") ;
   List.iter (fun (x, t) -> print_string ("  (" ^ x ^ " : " ^ string_of_type t ^ ")\n")) env
 

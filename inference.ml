@@ -239,7 +239,7 @@ let subst_instance (a : instance) (b : instance) : type_effect -> type_effect =
   in
   function t, e -> (aux_type (find_t t), aux_eff (find_e e))
 
-(* Give name to all occurences of anonymous operators *)
+(* Assign instance to all occurences of unnamed operators *)
 let rec name_unnamed (a : instance) : expr -> expr = function
   | Lam (x, e)      -> Lam (x, name_unnamed a e)
   | Fun (f, x, e)   -> Fun (f, x, name_unnamed a e)
@@ -255,7 +255,6 @@ let solve_simple (tcs : typ constraints) (ecs : effect constraints) : effect con
 
 let solve_within (gamma : env) ((typ, eff) : type_effect) (ecs : effect constraints) :
     effect constraints =
-  (* TODO: It may be less messy now *)
   let rec find_ev ev =
     match ev with
     | {contents= Free _} -> Some ev
@@ -330,7 +329,7 @@ let solve_within (gamma : env) ((typ, eff) : type_effect) (ecs : effect constrai
   ecs
 
 let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
-    env * type_effect * typ constraints * effect constraints =
+    env * type_effect * effect constraints =
   let tcs = ref [] and ecs = ref [] and env = ref [] in
   let add_to_env x_t = env := x_t :: !env
   and constrain_typ tc = tcs := tc :: !tcs
@@ -436,19 +435,20 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
         infer gamma theta (Handle (a, name_unnamed a e, h))
   in
   let typ, eff = solve_constraints_within gamma (infer gamma theta expr) in
-  ( match !ecs with
-  | []  -> ()
-  | ecs ->
-      print_string "Unresolved constraints: " ;
-      List.iter
-        (fun (e1, e2) -> print_string (string_of_effect e1 ^ " <: " ^ string_of_effect e2))
-        ecs ) ;
-  (!env, (find_t typ, find_e eff), !tcs, !ecs)
+  (!env, (find_t typ, find_e eff), !ecs)
 
-let infer_type (expr : expr) : env * typ * effect =
+let infer_type (expr : expr) : env * type_effect =
   try
-    let env, (typ, eff), cs, ecs = infer_type_with_env [] [] expr in
-    (env, typ, eff)
+    let env, typ_eff, ecs = infer_type_with_env [] [] expr in
+    ( match ecs with
+    | []  -> ()
+    | ecs ->
+        print_string "Unresolved constraints: " ;
+        List.iter
+          (fun (e1, e2) ->
+            print_string (string_of_effect e1 ^ " <: " ^ string_of_effect e2 ^ "\n"))
+          ecs ) ;
+    (env, typ_eff)
   with IllTypedExn e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
-    ([], IllTyped, pure)
+    ([], (IllTyped, pure))
