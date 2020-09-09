@@ -10,6 +10,7 @@ let print_inferred_type (expr : expr) : unit =
 let print_examples (name : string) (es : expr list) =
   print_string (name ^ ":\n") ;
   List.iter print_inferred_type es ;
+  refresh_univars () ;
   print_newline ()
 
 let _ =
