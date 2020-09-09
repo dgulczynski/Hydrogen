@@ -1,2 +1,4 @@
-#mod_use "effects.ml";;
-#use "effect_examples.ml";;
+#mod_use "calculus.ml";;
+#mod_use "utils.ml";;
+#mod_use "inference.ml";;
+#use "examples.ml";;

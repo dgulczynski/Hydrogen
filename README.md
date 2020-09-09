@@ -2,8 +2,8 @@
 Bachelor thesis project regarding type inference in presence of algebraic effects.
 
 # Usage
-To build the project along with examples use `ocamlbuild effect_examples.byte`.
-Running `./effect_examples.bye` (alternatively `ocaml print_examples.ml`) should result in output like:
+To build the project along with examples use `ocamlbuild examples.byte`.
+Running `./examples.byte` (alternatively `ocaml print_examples.ml`) should result in output like:
 ```
 Simple effects:
 ⊢ λe:Error. λx. raise_e x : ∀e:Error. Unit -{e}-> ?τ1 / ι

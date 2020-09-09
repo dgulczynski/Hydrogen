@@ -1,173 +1,15 @@
-type identifier = string
-
-type var = identifier
-
-type instance = identifier
-
-type 'a environment = (identifier * 'a) list
-
-type 'a univar = Free of identifier | Bound of 'a
-
-type 'a set = 'a list
+open Calculus
+open Utils
 
 type 'a constraints = ('a * 'a) list
 
-type typ =
-  | Unit
-  | Int
-  | Arrow    of typ * effect * typ
-  | TypVar   of typ univar ref
-  | GenTyp   of identifier
-  | Forall   of instance * signature * typ
-  | IllTyped
-
-and signature = Error | State of typ
-
-and effect =
-  | Fixed    of instance set
-  | Flexible of instance set * effect univar ref
-  | GenEff   of instance set * identifier
-
-type type_effect = typ * effect
-
-type expr =
-  | Nil
-  | I       of int
-  | V       of var
-  | Lam     of var * expr
-  | Fun     of var * var * expr
-  | Let     of var * expr * expr
-  | App     of expr * expr
-  | Op      of instance * op * expr
-  | Handle  of instance * expr * handler
-  | ILam    of instance * signature * expr
-  | IApp    of expr * instance
-  | UHandle of expr * handler
-  | UOp     of op * expr
-
-and op = Raise | Get | Put
-
-and handler = (op * var * var * expr) list * var * expr
-
-type op_type = typ * typ
+type variance = Covariant | Invariant | Contravariant
 
 type env = typ environment
 
 type ienv = signature environment
 
-type variance = Covariant | Invariant | Contravariant
-
-exception InferenceError of string
-
-let empty : 'a set = []
-
-let singleton (x : 'a) : 'a set = [x]
-
-let rec diff (xs : 'a set) (ys : 'a set) : 'a set =
-  match (xs, ys) with
-  | [], _ -> []
-  | xs, [] -> xs
-  | (x :: xs' as xs), (y :: ys' as ys) ->
-      if x < y then x :: diff xs' ys else if x = y then diff xs' ys' else diff xs ys'
-
-let rec merge (xs : 'a set) (ys : 'a set) : 'a set =
-  match (xs, ys) with
-  | [], ys -> ys
-  | xs, [] -> xs
-  | (x :: xs' as xs), (y :: ys' as ys) ->
-      if x < y then x :: merge xs' ys
-      else if x = y then x :: merge xs' ys'
-      else y :: merge xs ys'
-
-let pure : effect = Fixed empty
-
-let sig_map (f : typ -> typ) : signature -> signature = function
-  | Error   -> Error
-  | State t -> State (f t)
-
-let ( *** ) (is : instance set) : effect -> effect = function
-  | Fixed is'          -> Fixed (merge is is')
-  | Flexible (is', e') -> Flexible (merge is is', e')
-  | GenEff (is', gv)   -> GenEff (merge is is', gv)
-
-let ( <-: ) (r : 'a univar ref) (x : 'a) : unit = r := Bound x
-
-let rec find_e : effect -> effect = function
-  | Flexible ([], {contents= Bound e}) -> find_e e
-  | Flexible (is, {contents= Bound e}) -> is *** find_e e
-  | e -> e
-
-let rec find_t : typ -> typ = function
-  | Arrow (t1, eff, t2) -> Arrow (find_t t1, find_e eff, find_t t2)
-  | TypVar ({contents= Bound t} as tv) ->
-      let t' = find_t t in
-      tv <-: t' ; t'
-  | Forall (a, s, t) -> Forall (a, sig_map find_t s, find_t t)
-  | t -> t
-
-let rec string_of_type : typ -> string = function
-  | Unit                       -> "Unit"
-  | Int                        -> "Int"
-  | Arrow (t1, eff, t2)        ->
-      ( match find_t t1 with
-      | Arrow _ -> "(" ^ string_of_type t1 ^ ") "
-      | _       -> string_of_type t1 ^ " " )
-      ^ (match find_e eff with Fixed [] -> "" | eff' -> "-{" ^ string_of_effect eff' ^ "}")
-      ^ "-> " ^ string_of_type t2
-  | TypVar {contents= Free a}  -> a
-  | TypVar {contents= Bound t} -> string_of_type t
-  | GenTyp v                   -> v
-  | Forall (a, s, t)           -> "∀" ^ a ^ ":" ^ string_of_signature s ^ ". "
-                                  ^ string_of_type t
-  | IllTyped                   -> "ILL-TYPED"
-
-and string_of_signature : signature -> string = function
-  | Error   -> "Error"
-  | State t -> "State " ^ string_of_type t
-
-and string_of_effect (e : effect) : string =
-  let aux = List.fold_right (fun i acc -> i ^ "," ^ acc) in
-  match find_e e with
-  | Fixed [] -> "ι"
-  | Fixed [i] -> i
-  | Fixed is -> aux is ""
-  | Flexible ([], {contents= Free a}) | GenEff ([], a) -> a
-  | Flexible (is, {contents= Free a}) | GenEff (is, a) -> aux is a
-  | Flexible (is, {contents= Bound e}) -> aux is (string_of_effect e)
-
-let string_of_op : op -> string = function Raise -> "raise" | Put -> "put" | Get -> "get"
-
-let rec string_of_expr : expr -> string =
-  let aux = function
-    | Nil -> "()"
-    | I i -> string_of_int i
-    | V v -> v
-    | e   -> "(" ^ string_of_expr e ^ ")"
-  in
-  function
-  | Lam (x, e)       -> "λ" ^ x ^ ". " ^ string_of_expr e
-  | Fun (f, x, e)    -> "fun " ^ f ^ " " ^ x ^ ". " ^ string_of_expr e
-  | Let (x, e, e')   -> "let " ^ x ^ " = " ^ string_of_expr e ^ " in " ^ string_of_expr e'
-  | App (e1, e2)     -> aux e1 ^ " " ^ aux e2
-  | Op (a, op, e)    -> string_of_op op ^ "_" ^ a ^ " " ^ aux e
-  | Handle (a, e, h) -> "handle_" ^ a ^ " " ^ string_of_expr e ^ " " ^ string_of_handler h
-  | ILam (a, s, e)   -> "λ" ^ a ^ ":" ^ string_of_signature s ^ ". " ^ string_of_expr e
-  | IApp (e, a)      -> aux e ^ "<" ^ a ^ ">"
-  | UOp (op, e)      -> string_of_op op ^ " " ^ aux e
-  | UHandle (e, h)   -> "handle " ^ string_of_expr e ^ " " ^ string_of_handler h
-  | e'               -> aux e'
-
-and string_of_handler : handler -> string = function
-  | hs, x, ret ->
-      "{"
-      ^ List.fold_right
-          (fun (op, x, k, e) acc ->
-            string_of_op op ^ " " ^ x ^ " " ^ k ^ ". " ^ string_of_expr e ^ " | " ^ acc)
-          hs
-          ("return " ^ x ^ ". " ^ string_of_expr ret ^ "}")
-
-let string_of_type_effect : type_effect -> string = function
-  | t, e -> string_of_type t ^ " / " ^ string_of_effect e
+exception IllTypedExn of string
 
 let (freshTV : unit -> typ), (refreshTV : unit -> unit) =
   let counter = ref (-1) in
@@ -185,17 +27,19 @@ let (fresh_effect_univar : unit -> effect univar ref), (refreshEV : unit -> unit
 
 let freshEV (is : instance set) : effect = Flexible (is, fresh_effect_univar ())
 
+let refresh_unification_variables () : unit =
+  refreshTV () ; refreshEV ()
+
 let signature_of_instance (theta : ienv) (a : instance) : signature =
   match List.assoc_opt a theta with
-  | None   -> raise (InferenceError ("Free instance " ^ a))
+  | None   -> raise (IllTypedExn ("Free instance " ^ a))
   | Some s -> s
 
 let signature_of_handler ((ops, _, _) as h : handler) : signature =
   match ops with
   | [(Raise, _, _, _)] -> Error
   | [(Get, _, _, _); (Put, _, _, _)] | [(Put, _, _, _); (Get, _, _, _)] -> State (freshTV ())
-  | _ ->
-      raise (InferenceError ("Couldn't infer handler signature from " ^ string_of_handler h))
+  | _ -> raise (IllTypedExn ("Couldn't infer handler signature from " ^ string_of_handler h))
 
 let type_of_op (s : signature) (a : instance) (op : op) : op_type =
   match (s, op) with
@@ -204,7 +48,7 @@ let type_of_op (s : signature) (a : instance) (op : op) : op_type =
   | State t, Get -> (Unit, t)
   | s, op        ->
       raise
-        (InferenceError
+        (IllTypedExn
            ( "Instance " ^ a ^ ":" ^ string_of_signature s ^ " doesn't define operator "
            ^ string_of_op op ))
 
@@ -228,18 +72,17 @@ let rec union_t ((t1, t2) : typ * typ) (ecs : effect constraints) : effect const
   | TypVar {contents= Bound t}, t' | t', TypVar {contents= Bound t} -> union_t (t, t') ecs
   | TypVar ({contents= Free a} as tv), t' | t', TypVar ({contents= Free a} as tv) ->
       if occurs a t' then
-        raise
-          (InferenceError ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
+        raise (IllTypedExn ("The type variable " ^ a ^ " occurs inside " ^ string_of_type t'))
       else tv <-: t' ;
       ecs
   | t1', t2' ->
       raise
-        (InferenceError ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
+        (IllTypedExn ("Cannot unify " ^ string_of_type t1' ^ " with " ^ string_of_type t2'))
 
 and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect constraints =
   let on_failed_subtyping e1 e2 =
     raise
-      (InferenceError
+      (IllTypedExn
          ("Effect " ^ string_of_effect e1 ^ " does not subtype " ^ string_of_effect e2))
   in
   let e1' = find_e e1 and e2' = find_e e2 in
@@ -260,12 +103,12 @@ and union_e ((e1, e2) : effect * effect) (ecs : effect constraints) : effect con
       match diff i1 i2 with [] -> ecs | _ -> on_failed_subtyping e1' e2' )
     | _ ->
         raise
-          (InferenceError
+          (IllTypedExn
              ("Cannot unify " ^ string_of_effect e1' ^ " with " ^ string_of_effect e2'))
 
 let type_of_var (gamma : env) (v : var) : typ =
   match List.assoc_opt v gamma with
-  | None   -> raise (InferenceError ("Free variable " ^ v))
+  | None   -> raise (IllTypedExn ("Free variable " ^ v))
   | Some t -> find_t t
 
 let mix_variance (v1 : variance) (v2 : variance) : variance =
@@ -403,9 +246,9 @@ let rec name_unnamed (a : instance) : expr -> expr = function
   | Fun (f, x, e)   -> Fun (f, x, name_unnamed a e)
   | Let (x, e, e')  -> Let (x, name_unnamed a e, name_unnamed a e')
   | App (e1, e2)    -> App (name_unnamed a e1, name_unnamed a e2)
-  | Op _ | Handle _ -> raise (InferenceError "Named and unnamed handlers combined")
+  | Op _ | Handle _ -> raise (IllTypedExn "Named and unnamed handlers combined")
   | UOp (op, e)     -> Op (a, op, e)
-  | UHandle _       -> raise (InferenceError "Nested unnamed handlers")
+  | UHandle _       -> raise (IllTypedExn "Nested unnamed handlers")
   | e               -> e
 
 let solve_simple (tcs : typ constraints) (ecs : effect constraints) : effect constraints =
@@ -575,21 +418,20 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
             | State t1, State t2 -> constrain_typ (t2, t1)
             | _                  ->
                 raise
-                  (InferenceError
+                  (IllTypedExn
                      ( "Instance " ^ a ^ " : " ^ string_of_signature s ^ " application to "
                      ^ string_of_type_effect (t, eff) )) ) ;
             subst_instance a' a (t', eff)
         | t', s                  ->
             raise
-              (InferenceError
+              (IllTypedExn
                  ( "Instance (" ^ a ^ " : " ^ string_of_signature s ^ ") application to ("
                  ^ string_of_expr e ^ " : "
                  ^ string_of_type_effect (t', eff)
                  ^ ") which does not reduce to instance lambda" )) )
     | UOp (op, _)                 ->
         raise
-          (InferenceError
-             ("Operator " ^ string_of_op op ^ " used without corresponding handler"))
+          (IllTypedExn ("Operator " ^ string_of_op op ^ " used without corresponding handler"))
     | UHandle (e, h)              ->
         let a = "?unnamed" in
         infer gamma theta (Handle (a, name_unnamed a e, h))
@@ -603,6 +445,6 @@ let infer_type (expr : expr) : env * typ * effect =
     refreshEV () ;
     let env, (typ, eff), cs, ecs = infer_type_with_env [] [] expr in
     (env, typ, eff)
-  with InferenceError e ->
+  with IllTypedExn e ->
     print_string ("Type inference error: " ^ e ^ "\n") ;
     ([], IllTyped, pure)

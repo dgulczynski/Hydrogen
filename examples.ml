@@ -1,4 +1,6 @@
-open Effects
+open Calculus
+open Utils
+open Inference
 
 let print_inferred_type (expr : expr) : unit =
   let env, t, e = infer_type expr in
@@ -9,11 +11,6 @@ let print_examples (name : string) (es : expr list) =
   print_string (name ^ ":\n") ;
   List.iter print_inferred_type es ;
   print_newline ()
-
-(* Infix alternative constructors *)
-let ( @: ) e1 e2 = App (e1, e2)
-
-let ( ->: ) t1 t2 eff = Arrow (t1, eff, t2)
 
 let _ =
   print_examples "Simple effects"
