@@ -418,8 +418,8 @@ let infer_type_with_env (gamma : env) (theta : ienv) (expr : expr) :
             | _                  ->
                 raise
                   (IllTypedExn
-                     ( "Instance " ^ a ^ " : " ^ string_of_signature s ^ " application to "
-                     ^ string_of_type_effect (t, eff) )) ) ;
+                     ( "Signature mismatch, (" ^ a ^ " : " ^ string_of_signature s
+                     ^ ") cannot be substituted with " ^ string_of_signature s )) ) ;
             subst_instance a' a (t', eff)
         | t', s                  ->
             raise
