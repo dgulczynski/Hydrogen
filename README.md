@@ -3,6 +3,11 @@ Bachelor thesis project regarding type inference in presence of algebraic effect
 
 # Usage
 To build the project along with examples use `ocamlbuild examples.byte`.
+
+To try your own examples, you can use functions `print_inferred_type` or `print_examples` from README.md.
+
+To start repl session use `ocaml` or `utop` with `-init print_examples.ml`.
+
 Running `./examples.byte` (alternatively `ocaml print_examples.ml`) should result in output like:
 ```
 Simple effects:
